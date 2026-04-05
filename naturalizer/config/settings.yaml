@@ -1,0 +1,55 @@
+# config/settings.yaml — Naturalizer v4
+
+models:
+  naturalizacion: "claude-sonnet-4-6"       # Capas 1+2+3+3b (calidad alta)
+  integridad: "claude-haiku-4-5-20251001"   # Capa 8 (verificación, coste bajo)
+
+natural_score:
+  thresholds:
+    ok: 70          # >= 70: publicar
+    retry: 50       # 50-69: reintentar (hasta max_retries)
+    human: 50       # < 50: marcar para revisión humana
+  max_retries: 2
+  weights:
+    burstiness: 0.20
+    lexical_diversity: 0.20
+    pattern_detection: 0.25   # penalty (inverso)
+    paragraph_variance: 0.10
+    opening_score: 0.15
+    source_density: 0.10      # Fase 2, ahora usa 0.5 fijo (neutral)
+
+capas_activas:
+  fase1: [1, 2, 3, "3b", 7, 8]
+  fase2: [4, "5b"]   # 4=ExperienceDB, 5b=fuentes Serper+Jina
+  fase3: [6, "6b", 9]  # 6=competencia, 6b=schema autor, 9=feedback loop
+
+sites:
+  inforeparto:
+    db_user: "wp_user"
+    db_name: "wordpress_db"
+    author_type: "Organization"
+    author_name: "Inforeparto"
+    dominios_fuentes:
+      - "boe.es"
+      - "seg-social.es"
+      - "agenciatributaria.es"
+      - "xataka.com"
+      - "elmundo.es"
+      - "elpais.com"
+  psicoprotego:
+    db_user: "wp_psico_user"
+    db_name: "wp_psicoprotego"
+    author_type: "Organization"
+    author_name: "Equipo Psicoprotego"
+    dominios_fuentes:
+      - "who.int"
+      - "cop.es"
+      - "boe.es"
+      - "comunidad.madrid"
+
+pipeline:
+  max_content_chars: 80000
+  chunk_size: 75000
+  integrity_check_chars: 3000  # Trim para Capa 8 (Haiku)
+  on_integrity_fail: "warn"    # "warn" | "block" | "skip"
+  on_score_low: "warn"         # "warn" | "block" | "retry"

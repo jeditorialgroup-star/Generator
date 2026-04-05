@@ -33,3 +33,5 @@ scripts/affiliate_catalog.json
 # Archivos del sistema
 .DS_Store
 Thumbs.db
+blog-generator/
+nanocrawler/

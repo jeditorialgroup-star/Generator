@@ -1,0 +1,205 @@
+# Banco de Expresiones Informales — Español de España
+# Para Inforeparto y sitios con nivel_oralidad medio/alto
+# Cargado por Capa 2 (voz) y Capa 3 (variabilidad) del Naturalizer
+#
+# ⚠️ REGLAS DE USO:
+# - Máximo 4-6 expresiones informales por artículo de 1500 palabras
+# - No mezclar registros dentro del mismo artículo
+# - Distribuir a lo largo del texto, no concentrar en un párrafo
+# - Respetar el nivel_oralidad del perfil de voz del sitio
+# - Cada expresión debe fluir con el texto, no sentirse insertada
+
+saludos_aperturas:
+  uso: "Primera frase del artículo o al iniciar sección con tono fresco"
+  expresiones:
+    - expr: "¡Buenas! / ¡Muy buenas!"
+      registro: coloquial_neutro
+      ejemplo: "¡Muy buenas, riders! Hoy vamos con un tema que nos habéis pedido mucho."
+    - expr: "¿Qué tal va eso?"
+      registro: coloquial_cercano
+      ejemplo: "¿Qué tal va eso? Esperamos que con muchos pedidos y pocas cuestas."
+    - expr: "¡Vamos al lío!"
+      registro: coloquial_directo
+      ejemplo: "Ya sabéis cómo funciona esto. ¡Vamos al lío!"
+    - expr: "Al grano… / Sin rodeos…"
+      registro: neutro_directo
+      ejemplo: "Sin rodeos: la cuota de autónomos va a cambiar en 2026."
+    - expr: "Bueno, a ver…"
+      registro: coloquial_natural
+      ejemplo: "Bueno, a ver, el tema de las deducciones fiscales tiene más miga de lo que parece."
+    - expr: "¡Aquí estamos!"
+      registro: coloquial_autoentrada
+      ejemplo: "¡Aquí estamos otra vez! Esta semana con novedades de Glovo."
+
+sorpresa_enfasis:
+  uso: "Dato impactante, novedad inesperada o injusticia del sector"
+  expresiones:
+    - expr: "¡Venga ya!"
+      registro: coloquial
+      ejemplo: "La multa a Glovo: 450 millones. ¡Venga ya!"
+    - expr: "¡No fastidies!"
+      registro: coloquial_neutro
+      ejemplo: "¿Que ahora también hay que pagar eso? ¡No fastidies!"
+    - expr: "¡Flipo! / ¡Estoy flipando!"
+      registro: coloquial_juvenil
+      ejemplo: "He mirado las cifras y estoy flipando con lo que se ahorra."
+    - expr: "¡Madre mía!"
+      registro: coloquial_universal
+      ejemplo: "¡Madre mía, qué lío con el modelo 036!"
+    - expr: "¡Tela!"
+      registro: muy_español
+      ejemplo: "La burocracia para darse de alta... tela."
+    - expr: "¡Qué fuerte! / ¡Qué pasada!"
+      registro: coloquial
+      ejemplo: "¿Sabíais lo de la nueva tarifa plana? ¡Qué pasada!"
+    - expr: "¡Ojo! / ¡Ojito!"
+      registro: alerta_enfasis
+      ejemplo: "¡Ojo con esto! Si no marcas bien la casilla, te pueden sancionar."
+
+incredulidad_negacion:
+  uso: "Desmontar mitos, corregir información errónea, reaccionar a normativas injustas"
+  neutro_coloquial:
+    - "Ni de broma"
+    - "Ni hablar"
+    - "Ni de lejos"
+    - "Eso no hay quien se lo crea"
+  mas_coloquial:
+    - "Ni de coña"
+    - "Ni de casualidad"
+    - "Ni en pintura"
+  nota: "⚠️ NO mezclar niveles en el mismo artículo"
+
+conexion_lector:
+  uso: "Complicidad, introducir ejemplos, cambiar de tema. MUY útiles para romper patrones IA"
+  expresiones:
+    - expr: "¿Sabes qué pasa?"
+      uso_ideal: "Antes de revelar un insight"
+    - expr: "¿A que esto no te lo esperabas?"
+      uso_ideal: "Después de un dato sorprendente"
+    - expr: "Te pongo un ejemplo…"
+      uso_ideal: "Transición a caso práctico"
+    - expr: "Ponte en situación…"
+      uso_ideal: "Antes de describir un escenario"
+    - expr: "Imagínate esto…"
+      uso_ideal: "Apertura de sección narrativa"
+    - expr: "Fíjate en esto… / Ojo con esto…"
+      uso_ideal: "Antes de un punto importante"
+    - expr: "Aquí viene lo interesante…"
+      uso_ideal: "Transición a la parte clave"
+    - expr: "Pues bien…"
+      uso_ideal: "Conector natural, muy versátil"
+    - expr: "Dicho de otra forma…"
+      uso_ideal: "Para reformular algo técnico"
+
+marcadores_discursivos:
+  uso: "Salpicados con moderación. Son lo que más diferencia texto humano de IA"
+  nota: "La IA NUNCA usa 'es que...' ni 'o sea...' de forma natural"
+  expresiones:
+    - expr: "O sea…"
+      funcion: reformulacion
+      ejemplo: "O sea, que al final te sale más caro."
+    - expr: "Es que…"
+      funcion: justificacion_enfasis
+      ejemplo: "Es que nadie te explica esto cuando te das de alta."
+    - expr: "A ver…"
+      funcion: matizacion
+      ejemplo: "A ver, tampoco es tan complicado, pero hay que saberlo."
+    - expr: "Bueno…"
+      funcion: atenuacion_transicion
+      ejemplo: "Bueno, la realidad es que depende de cada caso."
+    - expr: "Vale…"
+      funcion: aceptacion_transicion
+      ejemplo: "Vale, ya sabemos el problema. ¿Y la solución?"
+    - expr: "Total…"
+      funcion: resumen_coloquial
+      ejemplo: "Total, que después de todo el lío, la respuesta es sencilla."
+    - expr: "Al final…"
+      funcion: cierre_razonamiento
+      ejemplo: "Al final, lo que importa es que tus cuentas cuadren."
+    - expr: "Y ya está"
+      funcion: cierre_definitivo
+      ejemplo: "Te das de alta, marcas la casilla 036, y ya está."
+    - expr: "Sin más"
+      funcion: cierre_neutro
+      ejemplo: "Es un trámite sencillo, sin más."
+  advertencia: "'En plan' es muy frecuente en oral pero envejece rápido en texto. Usar con mucha moderación."
+
+opinion_valoracion:
+  uso: "Dar recomendaciones, valorar productos, posicionarse sobre normativa"
+  expresiones:
+    - expr: "Yo creo que…"
+      registro: neutro
+    - expr: "Te digo una cosa…"
+      registro: coloquial_cercano
+    - expr: "No te voy a mentir…"
+      registro: coloquial_honesto
+    - expr: "Si te soy sincero…"
+      registro: coloquial
+    - expr: "La verdad es que…"
+      registro: neutro_coloquial
+    - expr: "Tiene toda la pinta de que…"
+      registro: coloquial
+    - expr: "(Ironía mode on)"
+      registro: acotacion
+      nota: "Usar como paréntesis después de ironía que podría no quedar clara"
+
+cercania_apoyo:
+  uso: "Artículos sobre trámites complicados, frustración del rider, cierre de artículo denso"
+  expresiones:
+    - "Tranqui"
+    - "No pasa nada"
+    - "No es para tanto"
+    - "Tiene arreglo"
+    - "Ya verás como sí"
+    - "Poco a poco"
+    - "Sin prisa, pero sin pausa"
+    - "Dale una vuelta"
+    - "Vamos viendo"
+    - "Tira para adelante"
+    - "Tú puedes con esto"
+
+cierres_despedidas:
+  uso: "Última frase del artículo. Alternar entre estilos"
+  estilos:
+    seco: ["Y ya estaría.", "Y poco más.", "Y listo."]
+    interactivo: ["¿Cómo lo ves?", "¿Tú qué harías?", "Te leemos en comentarios."]
+    comunitario: ["¡Nos vemos!", "¡Un saludo, riders!", "Seguimos."]
+    informativo: ["Nada más por hoy.", "Hasta aquí por esta vez."]
+
+expresiones_comodin:
+  uso: "En cualquier momento, cuando el texto necesita un toque humano"
+  expresiones:
+    - "Es lo que hay"
+    - "Tal cual"
+    - "Y punto"
+    - "Y ya"
+    - "Ni tan mal"
+    - "No está mal"
+    - "No es poca cosa"
+    - "Ahí está la clave"
+    - "Esa es la cuestión"
+    - "Tiene su aquel"  # muy idiomático, moderación
+
+expresiones_españolas:
+  uso: "Máximo 1-2 por artículo. Alto valor idiomático, abusar suena forzado"
+  expresiones:
+    - expr: "Dar en el clavo"
+      significado: acertar
+    - expr: "Ir al grano"
+      significado: ir directo al tema
+    - expr: "Meter la pata"
+      significado: equivocarse
+    - expr: "Estar al loro"
+      significado: estar atento
+    - expr: "Ir a su bola"
+      significado: actuar por libre
+    - expr: "Montarse películas"
+      significado: imaginar cosas
+    - expr: "Venirse arriba"
+      significado: entusiasmarse
+    - expr: "Bajarse del carro"
+      significado: abandonar
+    - expr: "Estar en las nubes"
+      significado: estar despistado
+    - expr: "No tener ni idea"
+      significado: desconocer totalmente
