@@ -81,6 +81,7 @@ LOGS_DIR = SCRIPTS_DIR / "logs"
 LOGS_DIR.mkdir(exist_ok=True)
 AFFILIATE_CATALOG_FILE = SCRIPTS_DIR / "affiliate_catalog.json"
 EMBEDDINGS_CACHE_FILE = SCRIPTS_DIR / "post_embeddings.json"
+INSIGHTS_FILE = SCRIPTS_DIR / "generation_insights.json"
 EDITORIAL_RULES_FILE = NATURALIZER_DIR / "contextos" / "inforeparto" / "editorial_rules.yaml"
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
 
@@ -766,6 +767,99 @@ def _fetch_sources_for_brief(keyword: str, serper_key: str, jina_key: str) -> li
     return sources
 
 
+# ── Generation insights (feedback loop) ──────────────────────────────────────
+
+def load_generation_insights() -> dict:
+    """Load generation_insights.json. Returns empty dict if not found or stale (>14 days)."""
+    if not INSIGHTS_FILE.exists():
+        return {}
+    try:
+        with open(INSIGHTS_FILE) as f:
+            data = json.load(f)
+        # Discard if older than 14 days
+        updated = date.fromisoformat(data.get("updated_at", "2000-01-01"))
+        if (date.today() - updated).days > 14:
+            log.info("  generation_insights.json tiene más de 14 días — ignorando")
+            return {}
+        return data
+    except Exception:
+        return {}
+
+
+def build_insights_directive(insights_data: dict) -> tuple[str, dict, bool]:
+    """
+    Build a data-driven directive string for the generation system prompt.
+    Also decide 70/30 exploitation/exploration and return generation_params.
+
+    Returns:
+        (directive_text, generation_params, is_experimental)
+    """
+    import random
+
+    insights = insights_data.get("insights", [])
+    actionable = [
+        i for i in insights
+        if i.get("confidence") in ("medium", "high") and abs(i.get("improvement_vs_average", 0)) > 0.2
+    ]
+
+    is_experimental = random.random() >= 0.7  # 30% experimental
+    generation_params = {"mode": "experimental" if is_experimental else "data_driven"}
+
+    if not actionable:
+        return "", generation_params, is_experimental
+
+    lines = []
+    if is_experimental:
+        lines.append("\n[MODO EXPERIMENTAL — 30% de varianza controlada para A/B testing]")
+        lines.append("Usa una estructura diferente a las recomendaciones habituales para medir variantes.")
+        generation_params["experimental_note"] = "Variante A/B — estructura libre"
+    else:
+        lines.append("\n[DIRECTRICES BASADAS EN DATOS — sigue estas recomendaciones para maximizar CTR]")
+        for ins in actionable[:5]:
+            char = ins["characteristic"]
+            best = ins.get("best_value", "")
+            rec = ins.get("recommendation", "")
+
+            if char == "opening_type" and best:
+                directive = {
+                    "anecdote": "Abre el artículo con una anécdota real de un repartidor (NO con dato estadístico ni pregunta)",
+                    "question": "Abre el artículo con una pregunta directa al lector (NO con anécdota ni dato)",
+                    "statistic": "Abre el artículo con un dato numérico concreto y sorprendente",
+                    "hook": "Abre con una frase de gancho provocadora (ej: 'Lo que nadie te dice sobre...')",
+                    "statement": "Abre con una afirmación directa y contundente sobre el tema",
+                }.get(best, rec)
+                lines.append(f"• APERTURA: {directive}")
+                generation_params["target_opening"] = best
+
+            elif char == "word_count":
+                r = ins.get("optimal_range", [])
+                if r and len(r) == 2:
+                    lines.append(f"• LONGITUD: apunta a {r[0]}-{r[1]} palabras")
+                    generation_params["target_words"] = r
+                else:
+                    lines.append(f"• LONGITUD: {rec}")
+
+            elif char == "experience_count" and best:
+                n_map = {"0": 0, "1-2": 2, "3-4": 3, "5+": 5}
+                n = n_map.get(best, 2)
+                lines.append(f"• EXPERIENCIAS: integra al menos {n} testimonios reales de repartidores")
+                generation_params["target_experiences"] = n
+
+            elif char == "h2_count" and best:
+                lines.append(f"• ESTRUCTURA: usa {best} secciones H2 (no más, no menos)")
+                generation_params["target_h2"] = best
+
+            elif char == "schema_type" and best:
+                lines.append(f"• SCHEMA: estructura el post como {best} (mejor CTR medido)")
+                generation_params["target_schema"] = best
+
+            elif rec:
+                lines.append(f"• {rec.upper()}")
+
+    directive_text = "\n".join(lines) if lines else ""
+    return directive_text, generation_params, is_experimental
+
+
 # ── Brief builder ─────────────────────────────────────────────────────────────
 
 def build_brief(keyword: str, research: dict, search_intent: str = "informational") -> str:
@@ -1302,28 +1396,68 @@ def log_post_performance(
     research: dict,
     has_disclaimer: bool,
     published_at,
+    characteristics: dict | None = None,
+    is_experimental: bool = False,
+    generation_params: dict | None = None,
 ):
-    """Insert initial row in post_performance for a newly published post."""
+    """Insert initial row in post_performance for a newly published post, including
+    all structural characteristics from post_analyzer."""
     try:
         import re as _re
-        word_count = len(_re.sub(r"<[^>]+>", "", html).split())
         num_affiliates = len(research.get("affiliate_products", []))
         num_internal = len(research.get("internal_links", []))
         num_images = html.count("<img ")
+
+        chars = characteristics or {}
+        word_count = chars.get("word_count") or len(_re.sub(r"<[^>]+>", "", html).split())
+
         conn = db_connect()
         cur = conn.cursor()
         cur.execute(
-            """INSERT INTO post_performance
+            f"""INSERT INTO {POST_PERFORMANCE_TABLE}
                (post_id, site, keyword, search_intent, schema_type, word_count,
                 natural_score, num_affiliates, num_internal_links, num_images,
-                has_disclaimer, published_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                has_disclaimer, published_at,
+                opening_type, paragraph_count, avg_paragraph_length,
+                h2_count, h3_count, list_count, affiliate_count, affiliate_positions,
+                internal_link_count, external_source_count, experience_count,
+                reading_time_minutes, is_experimental, generation_params)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON DUPLICATE KEY UPDATE
-               natural_score=VALUES(natural_score), schema_type=VALUES(schema_type)""",
+                 natural_score=VALUES(natural_score),
+                 schema_type=VALUES(schema_type),
+                 opening_type=VALUES(opening_type),
+                 paragraph_count=VALUES(paragraph_count),
+                 avg_paragraph_length=VALUES(avg_paragraph_length),
+                 h2_count=VALUES(h2_count),
+                 h3_count=VALUES(h3_count),
+                 list_count=VALUES(list_count),
+                 affiliate_count=VALUES(affiliate_count),
+                 affiliate_positions=VALUES(affiliate_positions),
+                 internal_link_count=VALUES(internal_link_count),
+                 external_source_count=VALUES(external_source_count),
+                 experience_count=VALUES(experience_count),
+                 reading_time_minutes=VALUES(reading_time_minutes),
+                 is_experimental=VALUES(is_experimental),
+                 generation_params=VALUES(generation_params)""",
             (
                 wp_post_id, SITE, keyword, search_intent, schema_type, word_count,
                 score, num_affiliates, num_internal, num_images,
                 int(has_disclaimer), published_at,
+                chars.get("opening_type"),
+                chars.get("paragraph_count", 0),
+                chars.get("avg_paragraph_length", 0),
+                chars.get("h2_count", 0),
+                chars.get("h3_count", 0),
+                chars.get("list_count", 0),
+                chars.get("affiliate_count", num_affiliates),
+                json.dumps(chars.get("affiliate_positions", [])) if chars.get("affiliate_positions") else None,
+                chars.get("internal_link_count", num_internal),
+                chars.get("external_source_count", 0),
+                chars.get("experience_count", 0),
+                chars.get("reading_time_minutes", 0),
+                int(is_experimental),
+                json.dumps(generation_params, ensure_ascii=False) if generation_params else None,
             ),
         )
         conn.commit()
@@ -1438,6 +1572,13 @@ def main():
             f"Considera añadir productos relevantes al catálogo."
         )
 
+    # ── Load generation insights (feedback loop) ─────────────────────────────
+    insights_data = load_generation_insights()
+    insights_directive, generation_params, is_experimental = build_insights_directive(insights_data)
+    if insights_directive:
+        mode = "EXPERIMENTAL" if is_experimental else "datos"
+        log.info(f"  Insights cargados [{mode}]: {list(generation_params.keys())}")
+
     # ── Build brief ───────────────────────────────────────────────────────────
     brief = build_brief(keyword, research, search_intent=search_intent)
     log.info(f"Brief construido ({len(brief)} chars)")
@@ -1458,6 +1599,9 @@ def main():
                     reinforcement += f"- PROHIBIDO usar: {terms_str}. {g['reason']}\n"
                 log.warning("  Retry: añadiendo refuerzo de guardrails al brief")
                 _brief = reinforcement + "\n" + brief
+            # Inject data-driven directive into brief
+            if insights_directive:
+                _brief = _brief + "\n" + insights_directive
             raw_html = generate_post(keyword, _brief, settings, api_key)
         except Exception as e:
             log.error(f"Error en generación (intento {attempt+1}): {e}")
@@ -1538,6 +1682,21 @@ def main():
     if not integrity_ok:
         log.warning(f"Integridad (Capa 8): {issues}")
 
+    # ── Analyze post characteristics (Phase 6.1) ─────────────────────────────
+    post_chars = {}
+    try:
+        from post_analyzer import analyze_post_characteristics
+        post_chars = analyze_post_characteristics(naturalized, brief=research, wp_url=WP_URL)
+        log.info(
+            f"Post analyzer: {post_chars['word_count']}w, "
+            f"opening={post_chars['opening_type']}, "
+            f"{post_chars['h2_count']}H2, "
+            f"exp={post_chars['experience_count']}, "
+            f"aff={post_chars['affiliate_count']}"
+        )
+    except Exception as e:
+        log.warning(f"  post_analyzer error: {e}")
+
     # ── Publish or draft ──────────────────────────────────────────────────────
     conn = db_connect()
 
@@ -1563,23 +1722,27 @@ def main():
             if not args.dry_run:
                 log_to_db(title, wp_post_id, score, research, schema_type)
                 ping_sitemap()
-                # Record initial performance row
+                # Record initial performance row with full characteristics
                 topic_row = research.get("_topic_row", {})
                 log_post_performance(
                     wp_post_id=wp_post_id,
                     keyword=keyword,
-                    search_intent=topic_row.get("search_intent", "informational"),
+                    search_intent=topic_row.get("search_intent", search_intent),
                     schema_type=schema_type,
                     html=naturalized,
                     score=score_val,
                     research=research,
                     has_disclaimer="disclaimer" in naturalized.lower(),
                     published_at=publish_dt,
+                    characteristics=post_chars,
+                    is_experimental=is_experimental,
+                    generation_params=generation_params,
                 )
 
             preview_url = f"{WP_URL}/?p={wp_post_id}"
+            exp_label = "🧪 EXPERIMENTAL" if is_experimental else "📊 basado en datos"
             lines = [
-                f"✅ <b>Post generado y programado</b>",
+                f"✅ <b>Post generado y programado</b> [{exp_label}]",
                 f"📌 {title}",
                 f"📅 Publicación: {publish_dt.strftime('%A %d %B · %H:%M')}h",
                 f"🔗 <a href='{preview_url}'>Preview WP</a>",
