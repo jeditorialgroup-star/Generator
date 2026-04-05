@@ -34,6 +34,10 @@ INDEXING_API = "https://indexing.googleapis.com/v3/urlNotifications:publish"
 WP_PATH = "/var/www/inforeparto"
 WP_URL = "https://inforeparto.com"
 
+# IndexNow (Bing/Yandex)
+INDEXNOW_KEY = os.environ.get("INDEXNOW_KEY", "2f5ab127cde204cb00580fbf5f32a504")
+INDEXNOW_ENDPOINT = "https://api.indexnow.org/indexnow"
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 LOG_DIR = Path(os.environ.get("LOG_DIR", "/var/log/projects"))
@@ -84,6 +88,28 @@ def get_post_urls(post_ids: list | None = None, limit: int = 10) -> list[str]:
     return urls
 
 
+def notify_indexnow(url: str) -> bool:
+    """Send an IndexNow notification to Bing/Yandex for a single URL."""
+    try:
+        resp = requests.get(
+            INDEXNOW_ENDPOINT,
+            params={
+                "url": url,
+                "key": INDEXNOW_KEY,
+                "keyLocation": f"{WP_URL}/{INDEXNOW_KEY}.txt",
+            },
+            timeout=10,
+        )
+        if resp.status_code in (200, 202):
+            log.info(f"  IndexNow OK: {url}")
+            return True
+        log.warning(f"  IndexNow {resp.status_code}: {url}")
+        return False
+    except Exception as e:
+        log.warning(f"  IndexNow error: {e}")
+        return False
+
+
 def notify_url(token: str, url: str) -> tuple[int, dict]:
     """Send a URL_UPDATED notification to the Google Indexing API."""
     headers = {
@@ -126,6 +152,7 @@ def main():
         if status == 200:
             log.info(f"  OK: {url}")
             ok += 1
+            notify_indexnow(url)
         else:
             err = body.get("error", {}).get("message", str(body))
             log.warning(f"  ERROR {status}: {url} — {err}")
