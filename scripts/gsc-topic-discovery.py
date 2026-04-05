@@ -89,6 +89,20 @@ def db_connect():
     return mysql.connector.connect(**DB)
 
 
+def ensure_search_intent_column(conn):
+    """Add search_intent column to ir_topic_queue if it doesn't exist."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "ALTER TABLE ir_topic_queue ADD COLUMN search_intent VARCHAR(30) DEFAULT 'informational'"
+        )
+        conn.commit()
+        log.info("  Columna search_intent añadida a ir_topic_queue")
+    except Exception:
+        pass  # ya existe
+    cur.close()
+
+
 def get_existing_keywords(conn) -> set:
     """Keywords ya en la cola (cualquier estado)."""
     cur = conn.cursor()
@@ -96,6 +110,48 @@ def get_existing_keywords(conn) -> set:
     keywords = {row[0].lower() for row in cur.fetchall()}
     cur.close()
     return keywords
+
+
+def classify_search_intent(keyword: str) -> str:
+    """Classify keyword intent: transactional, commercial_investigation, navigational, or informational."""
+    kw = keyword.lower()
+
+    NAVIGATIONAL = [
+        "glovo", "uber eats", "ubereats", "just eat", "deliveroo", "amazon flex",
+        "stuart", "rappi", "bolt food", "inforeparto",
+    ]
+    TRANSACTIONAL = [
+        "mejor", "mejores", "comparativa", "precio", "precios", "comprar", "cuál",
+        "cuáles", "recomendación", "recomendaciones", "barato", "baratos", "oferta",
+        "ofertas", "alternativa", "alternativas", " vs ", "review", "opinión",
+        "opiniones", "merece la pena", "dónde comprar", "donde comprar", "vale la pena",
+        "más barato", "más económico", "relación calidad", "top ", "ranking",
+        "cuánto cuesta", "cuanto cuesta",
+    ]
+    COMMERCIAL = [
+        "cómo elegir", "como elegir", "guía de compra", "guia de compra",
+        "qué buscar en", "que buscar en", "tipos de", "qué tener en cuenta",
+        "que tener en cuenta", "a tener en cuenta",
+    ]
+
+    for brand in NAVIGATIONAL:
+        if brand in kw:
+            return "navigational"
+    for phrase in TRANSACTIONAL:
+        if phrase in kw:
+            return "transactional"
+    for phrase in COMMERCIAL:
+        if phrase in kw:
+            return "commercial_investigation"
+    return "informational"
+
+
+INTENT_MULTIPLIER = {
+    "transactional": 1.5,
+    "commercial_investigation": 1.3,
+    "informational": 1.0,
+    "navigational": 0.5,
+}
 
 
 def insert_topics(conn, topics: list[dict], dry_run: bool) -> int:
@@ -108,8 +164,8 @@ def insert_topics(conn, topics: list[dict], dry_run: bool) -> int:
         try:
             cur.execute(
                 """INSERT IGNORE INTO ir_topic_queue
-                   (site, keyword, source, priority, gsc_impressions, gsc_avg_position)
-                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                   (site, keyword, source, priority, gsc_impressions, gsc_avg_position, search_intent)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                 (
                     SITE,
                     t["keyword"],
@@ -117,6 +173,7 @@ def insert_topics(conn, topics: list[dict], dry_run: bool) -> int:
                     t["priority"],
                     t.get("impressions"),
                     t.get("avg_position"),
+                    t.get("search_intent", "informational"),
                 ),
             )
             if cur.rowcount:
@@ -239,15 +296,18 @@ def has_similar_post(query: str, cache: dict, threshold: float) -> bool:
 
 # ── Priority scoring ──────────────────────────────────────────────────────────
 
-def compute_priority(impressions: int, avg_position: float, ctr: float) -> float:
+def compute_priority(impressions: int, avg_position: float, ctr: float, intent: str = "informational") -> float:
     """
-    Priority 0-1. Higher = more urgent to cover.
+    Priority 0-1 (capped at 1.0). Higher = more urgent to cover.
     Factors: high impressions + bad position + low CTR = big opportunity.
+    Intent multiplier: transactional×1.5, commercial×1.3, informational×1.0, navigational×0.5.
     """
     imp_score = min(1.0, impressions / 500)
     pos_score = min(1.0, max(0, (avg_position - 8) / 42))  # 8 → 0, 50 → 1
     ctr_penalty = max(0, 1 - ctr / 5)  # CTR 5%+ → penalizar (ya tenemos tráfico)
-    return round(imp_score * 0.4 + pos_score * 0.4 + ctr_penalty * 0.2, 3)
+    base = imp_score * 0.4 + pos_score * 0.4 + ctr_penalty * 0.2
+    multiplier = INTENT_MULTIPLIER.get(intent, 1.0)
+    return round(min(1.0, base * multiplier), 3)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -264,6 +324,7 @@ def main():
     log.info(f"{prefix}GSC Topic Discovery — {date.today().isoformat()}")
 
     conn = db_connect()
+    ensure_search_intent_column(conn)
     existing_keywords = get_existing_keywords(conn)
 
     # ── Step 1: GSC gap queries ───────────────────────────────────────────────
@@ -305,7 +366,8 @@ def main():
             skipped_semantic += 1
             continue
 
-        priority = compute_priority(q["impressions"], q["avg_position"], q["ctr"])
+        intent = classify_search_intent(keyword)
+        priority = compute_priority(q["impressions"], q["avg_position"], q["ctr"], intent)
 
         candidates.append({
             "keyword": keyword,
@@ -313,6 +375,7 @@ def main():
             "priority": priority,
             "impressions": q["impressions"],
             "avg_position": q["avg_position"],
+            "search_intent": intent,
         })
 
     log.info(f"  Skipped (existing/branded/short): {skipped_existing}")
@@ -327,7 +390,7 @@ def main():
         log.info(f"Top {len(to_insert)} topics to add:")
         for t in to_insert:
             flag = "[DRY] " if args.dry_run else ""
-            log.info(f"  {flag}[p={t['priority']:.2f} pos={t['avg_position']} imp={t['impressions']}] {t['keyword']}")
+            log.info(f"  {flag}[p={t['priority']:.2f} pos={t['avg_position']} imp={t['impressions']} {t['search_intent']}] {t['keyword']}")
 
     inserted = insert_topics(conn, to_insert, args.dry_run)
     conn.close()
@@ -340,7 +403,8 @@ def main():
         if to_insert:
             lines.append("\nTop 5 prioridad:")
             for t in to_insert[:5]:
-                lines.append(f"  • [{t['avg_position']:.0f}pos / {t['impressions']}imp] {t['keyword']}")
+                intent_emoji = {"transactional": "💰", "commercial_investigation": "🛒", "navigational": "🧭"}.get(t["search_intent"], "ℹ️")
+                lines.append(f"  • {intent_emoji} [{t['avg_position']:.0f}pos / {t['impressions']}imp] {t['keyword']}")
         telegram_send("\n".join(lines))
     else:
         log.info(f"[DRY-RUN] Hubiera insertado {len(to_insert)} topics.")
