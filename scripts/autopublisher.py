@@ -839,6 +839,60 @@ def save_as_draft(title: str, content: str, dry_run: bool) -> int | None:
     return None
 
 
+# ── Affiliate link tracking rewriter ─────────────────────────────────────────
+
+_AMAZON_LINK_RE = re.compile(
+    r'href="https://www\.amazon\.es/dp/([A-Z0-9]{10})[^"]*"',
+    re.IGNORECASE,
+)
+
+
+def rewrite_affiliate_links(html: str, wp_post_id: int) -> str:
+    """Replace Amazon affiliate links with click-tracking URLs that redirect to Amazon.
+
+    Position is assigned by relative order: first third → top, middle → middle, last → bottom.
+    """
+    links = _AMAZON_LINK_RE.findall(html)
+    if not links:
+        return html
+
+    total = len(links)
+    counter = [0]  # mutable for use in sub()
+
+    def replacer(m: re.Match) -> str:
+        asin = m.group(1).upper()
+        idx = counter[0]
+        counter[0] += 1
+        if total == 1:
+            position = "middle"
+        elif idx < total / 3:
+            position = "top"
+        elif idx < 2 * total / 3:
+            position = "middle"
+        else:
+            position = "bottom"
+        tracking_url = f"/tracking/click.php?asin={asin}&post_id={wp_post_id}&position={position}"
+        return f'href="{tracking_url}"'
+
+    return _AMAZON_LINK_RE.sub(replacer, html)
+
+
+def update_post_content(wp_post_id: int, content: str) -> bool:
+    """Update the content of an existing WP post via WP CLI."""
+    result = subprocess.run(
+        [
+            "wp", "post", "update", str(wp_post_id),
+            f"--post_content={content}",
+            f"--path={WP_PATH}",
+        ],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        return True
+    log.error(f"  WP update error: {result.stderr[:200]}")
+    return False
+
+
 # ── Naturalization ────────────────────────────────────────────────────────────
 
 def naturalize_content(content: str, title: str, research: dict) -> tuple[str, dict, bool, list]:
@@ -1104,6 +1158,13 @@ def main():
 
         wp_post_id = publish_to_wp(title, naturalized, publish_dt, args.dry_run)
         if wp_post_id:
+            # Rewrite affiliate links to tracking URLs now that we have the post ID
+            if not args.dry_run:
+                tracked_html = rewrite_affiliate_links(naturalized, wp_post_id)
+                if tracked_html != naturalized:
+                    update_post_content(wp_post_id, tracked_html)
+                    log.info("  Affiliate links reescritos a tracking URLs")
+
             # Featured image (no credits, Spanish context)
             img_set = fetch_featured_image(wp_post_id, title, naturalized, rules, args.dry_run)
 
