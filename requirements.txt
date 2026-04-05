@@ -1,0 +1,19 @@
+# requirements.txt — inforeparto.com Content Pipeline
+# Instalación: pip install -r requirements.txt
+
+# ── LLM ──────────────────────────────────────────────────────────────────────
+anthropic>=0.40.0
+
+# ── Base de datos ─────────────────────────────────────────────────────────────
+mysql-connector-python>=8.0.0
+
+# ── HTTP ──────────────────────────────────────────────────────────────────────
+requests>=2.31.0
+
+# ── Configuración ─────────────────────────────────────────────────────────────
+PyYAML>=6.0
+python-dotenv>=1.0.0
+
+# ── Google APIs (GSC + Indexing API) ─────────────────────────────────────────
+google-auth>=2.25.0
+google-auth-httplib2>=0.2.0

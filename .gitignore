@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Entorno y credenciales
+.env
+.env.*
+!.env.example
+*.json.bak
+
+# Logs
+scripts/logs/
+*.log
+
+# Cache de embeddings (generado en runtime)
+scripts/post_embeddings.json
+
+# Estado de batch (generado en runtime)
+scripts/batch_state.json
+
+# Catálogo afiliados (datos sensibles/runtime)
+scripts/affiliate_catalog.json
+
+# Credenciales Google
+*.json
+!skills/*/config.json
+!naturalizer/contextos/**/*.json
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
