@@ -1,0 +1,108 @@
+# keyword_seeds.yaml — psicoprotego.es
+# Clusters de keywords semilla para el pipeline de topic discovery.
+# Organizados por localización y temática.
+
+clusters:
+
+  majadahonda:
+    priority: 1
+    description: "Mercado primario — alto intent local"
+    seeds:
+      - "psicólogo Majadahonda"
+      - "psicóloga Majadahonda"
+      - "terapia psicológica Majadahonda"
+      - "terapia ansiedad Majadahonda"
+      - "terapia depresión Majadahonda"
+      - "psicólogo infantil Majadahonda"
+      - "psicólogo adolescentes Majadahonda"
+      - "psicólogo adultos Majadahonda"
+      - "cita psicólogo Majadahonda"
+      - "centro psicología Majadahonda"
+
+  pozuelo:
+    priority: 1
+    description: "Mercado primario — ubicación clínica"
+    seeds:
+      - "psicólogo Pozuelo de Alarcón"
+      - "psicóloga Pozuelo de Alarcón"
+      - "terapia psicológica Pozuelo"
+      - "psicólogo adolescentes Pozuelo"
+      - "centro psicología Pozuelo de Alarcón"
+      - "psicólogo online Pozuelo"
+
+  las_rozas:
+    priority: 2
+    description: "Mercado secundario — zona de influencia"
+    seeds:
+      - "psicólogo Las Rozas"
+      - "terapia psicológica Las Rozas"
+      - "psicólogo adolescentes Las Rozas"
+      - "psicólogo ansiedad Las Rozas"
+
+  adolescentes:
+    priority: 2
+    description: "Alta búsqueda, baja dificultad — especialidad clave"
+    seeds:
+      - "psicólogo adolescentes Madrid"
+      - "terapia adolescentes ansiedad"
+      - "mi hijo adolescente tiene ansiedad"
+      - "psicólogo adolescente rebelde"
+      - "terapia familiar adolescentes"
+      - "psicólogo para jóvenes"
+      - "problemas conducta adolescente"
+      - "autoestima adolescentes terapia"
+      - "fobia social adolescentes tratamiento"
+
+  emdr:
+    priority: 2
+    description: "Especialidad de Cristina — alta intención de búsqueda"
+    seeds:
+      - "EMDR Madrid"
+      - "EMDR terapia trauma"
+      - "qué es EMDR"
+      - "EMDR ansiedad"
+      - "EMDR para qué sirve"
+      - "terapia EMDR trauma infancia"
+      - "EMDR duelo"
+      - "EMDR fobia"
+      - "EMDR Madrid precio"
+      - "psicólogo EMDR cerca"
+
+  ansiedad:
+    priority: 3
+    description: "Alto volumen — contenido informacional + local"
+    seeds:
+      - "cómo controlar la ansiedad"
+      - "síntomas ansiedad generalizada"
+      - "terapia cognitivo conductual ansiedad"
+      - "ataques de pánico tratamiento"
+      - "ansiedad social tratamiento"
+      - "ansiedad sin causa aparente"
+      - "medicación ansiedad vs terapia"
+      - "técnicas relajación ansiedad"
+      - "cuándo ir al psicólogo por ansiedad"
+
+  depresion:
+    priority: 3
+    description: "Alto volumen — contenido informacional + derivación"
+    seeds:
+      - "síntomas depresión"
+      - "cómo salir de la depresión"
+      - "terapia para la depresión"
+      - "depresión y trabajo"
+      - "depresión postparto tratamiento"
+      - "diferencia tristeza y depresión"
+      - "cuándo pedir ayuda psicológica"
+      - "antidepresivos vs terapia"
+
+  trauma:
+    priority: 3
+    description: "Especialidad EMDR — contenido de concienciación"
+    seeds:
+      - "trauma psicológico síntomas"
+      - "TEPT tratamiento"
+      - "trauma infancia adultos"
+      - "cómo superar un trauma"
+      - "terapia trauma Madrid"
+      - "trauma complejo tratamiento"
+      - "disociación trauma"

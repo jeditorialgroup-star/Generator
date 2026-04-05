@@ -1,0 +1,64 @@
+# site_config.yaml — psicoprotego.es
+# Configuración específica del sitio para el pipeline multi-site.
+
+site_id: "psicoprotego"
+domain: "psicoprotego.es"
+wp_url: "https://psicoprotego.es"
+wp_path: "/var/www/psicoprotego"
+wp_db_prefix: "wp_"
+description: "Clínica de psicología en Pozuelo de Alarcón y Majadahonda"
+
+# Base de datos
+db_env_prefix: "WP_PSICO"   # WP_PSICO_DB_HOST, WP_PSICO_DB_USER, etc.
+topic_queue_table: "psi_topic_queue"
+naturalization_log_table: "psi_naturalization_log"
+affiliate_clicks_table: null  # sin tracking de afiliados
+
+# Afiliados Amazon — no aplica para psicoprotego
+affiliate_tag: null
+affiliate_catalog: null
+
+# GSC
+gsc_property: "https://psicoprotego.es/"
+
+# Telegram
+telegram_chat_id_env: "TELEGRAM_CHAT_ID"
+
+# Imágenes
+pexels_locale: "es-ES"
+pexels_language: "psicología terapia consulta profesional"
+
+# Calendario de publicación
+post_interval_days: 5      # menos frecuencia, más calidad
+publish_hour_min: 9
+publish_hour_max: 18
+
+# Meta keys de WordPress
+meta_prefix: "_psi_"
+meta_autopublished: "_psi_autopublished"
+
+# Score mínimo para publicar (NaturalScore — YMYL requiere mayor umbral)
+score_threshold: 75
+
+# Guardrails de contenido — YMYL crítico
+content_guardrails:
+  - prohibited_terms: ["debes tomar", "te recomiendo tomar", "tu dosis es", "la dosis de"]
+    exceptions: []
+    reason: "No posologías. Contenido YMYL: no prescribir medicación."
+    retry_with_reinforced_brief: true
+
+  - prohibited_terms: ["tu diagnóstico es", "tienes", "padeces", "sufres de"]
+    exceptions: ["puede que", "podría indicar", "en algunos casos"]
+    reason: "No diagnósticos directos. El contenido debe ser informativo, no diagnóstico."
+    retry_with_reinforced_brief: true
+
+  - prohibited_terms: ["garantizamos resultados", "te curaremos", "curación garantizada", "100% efectivo"]
+    exceptions: []
+    reason: "No predicciones de resultado terapéutico. Prohibido por código deontológico."
+    retry_with_reinforced_brief: false
+
+# Aviso YMYL obligatorio en todos los posts
+affiliate_disclosure: null
+
+# Disclaimer YMYL (añadido siempre, sin condición de keyword)
+ymyl_disclaimer_always: true

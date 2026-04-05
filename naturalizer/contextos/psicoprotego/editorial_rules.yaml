@@ -1,0 +1,62 @@
+# editorial_rules.yaml — psicoprotego.es
+# Reglas editoriales, restricciones temáticas y requisitos de disclaimer.
+# Contenido YMYL (Your Money or Your Life) — reglas estrictas.
+
+# ── Temas prohibidos ────────────────────────────────────────────────────────
+
+prohibited_topics:
+  - keywords: ["diagnóstico específico", "tu diagnóstico es", "padeces trastorno", "tienes depresión", "sufres de ansiedad"]
+    exceptions: ["puede ser señal de", "podría indicar", "en algunos casos"]
+    reason: "No diagnósticos directos sin evaluación clínica. El lector no es paciente del artículo."
+
+  - keywords: ["dosis de", "tomar mg", "tomar miligramos", "medicación diaria", "pastilla para"]
+    exceptions: []
+    reason: "No posologías bajo ningún concepto. Remitir siempre a médico o psiquiatra."
+
+  - keywords: ["garantizamos", "curación garantizada", "te curaremos", "100% efectivo", "seguro que"]
+    exceptions: []
+    reason: "Predicciones de resultado prohibidas por el código deontológico del psicólogo."
+
+  - keywords: ["suicidio cómo", "cómo hacerlo", "método para", "sin que duela"]
+    exceptions: []
+    reason: "Protocolo de seguridad: nunca describir métodos. Remitir a 024 o servicios de emergencia."
+
+# ── Disclaimers obligatorios ────────────────────────────────────────────────
+
+disclaimer_triggers:
+  ymyl_universal:
+    trigger_keywords: []   # vacío = se aplica SIEMPRE en todos los posts
+    placement: "before_first_h2"
+    html: |
+      <div class="disclaimer disclaimer-ymyl" style="background:#f0f7f4;border-left:4px solid #2D5F3F;padding:12px 16px;margin:16px 0;border-radius:4px;">
+        <strong>Aviso importante:</strong> Este artículo tiene carácter informativo y divulgativo.
+        No sustituye la evaluación, diagnóstico ni tratamiento por parte de un profesional de la salud mental.
+        Si estás pasando por un momento difícil, <a href="https://psicoprotego.es/contacto/">contacta con nosotros</a>
+        o llama al <strong>024</strong> (línea de atención a conducta suicida, gratuita 24h).
+      </div>
+
+  crisis:
+    trigger_keywords: ["suicidio", "autolesión", "hacerme daño", "no querer vivir", "crisis", "ideación"]
+    placement: "before_first_h2"
+    html: |
+      <div class="disclaimer disclaimer-crisis" style="background:#fef2f2;border-left:4px solid #dc2626;padding:12px 16px;margin:16px 0;border-radius:4px;">
+        <strong>Si estás en crisis:</strong> Llama al <strong>024</strong> (gratuito, 24h) o acude a urgencias.
+        En Psicoprotego también puedes escribirnos a <a href="mailto:info@psicoprotego.es">info@psicoprotego.es</a>.
+      </div>
+
+# ── Red flags ───────────────────────────────────────────────────────────────
+# Patrones que se detectan post-generación y disparan revisión manual
+
+red_flags:
+  - pattern: "debes tomar"
+    severity: "critical"
+    message: "Posología detectada"
+  - pattern: "tu diagnóstico"
+    severity: "critical"
+    message: "Diagnóstico directo detectado"
+  - pattern: "garantizamos"
+    severity: "high"
+    message: "Predicción de resultado detectada"
+  - pattern: "100% efectivo"
+    severity: "high"
+    message: "Afirmación absoluta de eficacia"

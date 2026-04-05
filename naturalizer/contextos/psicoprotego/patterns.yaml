@@ -1,0 +1,63 @@
+# patterns.yaml — psicoprotego.es
+# Patrones de escritura IA a eliminar en textos de psicología/salud mental.
+
+malas_aperturas:
+  - "En este artículo"
+  - "En este post"
+  - "A lo largo de este artículo"
+  - "Hoy vamos a hablar de"
+  - "La salud mental es importante"
+  - "Cada vez más personas"
+  - "En la sociedad actual"
+  - "En los últimos años"
+  - "Es bien sabido que"
+  - "Todos sabemos que"
+  - "La ansiedad es una emoción normal"  # demasiado genérico como apertura
+  - "La depresión afecta a millones"      # dato vacío como apertura
+
+frases_roboticas:
+  - "Es fundamental"
+  - "Es esencial"
+  - "Es crucial"
+  - "Es importante destacar"
+  - "Cabe mencionar"
+  - "No podemos olvidar"
+  - "Vale la pena mencionar"
+  - "En definitiva"
+  - "En resumen"
+  - "En conclusión"
+  - "Para concluir"
+  - "Como hemos visto"
+  - "A modo de conclusión"
+  - "Dicho esto"
+  - "Sin embargo, es importante"
+  - "Por otro lado, es esencial"
+
+frases_corporativas_psico:
+  - "Nuestro equipo de profesionales"
+  - "Contamos con años de experiencia"
+  - "Ofrecemos un servicio de calidad"
+  - "Tratamos a cada paciente de forma personalizada"
+  - "Estamos a tu disposición"
+  - "No dudes en contactarnos"
+  - "Tu bienestar es nuestra prioridad"
+
+exceso_calificadores:
+  - "muy importante"
+  - "extremadamente relevante"
+  - "absolutamente necesario"
+  - "totalmente normal"
+  - "completamente natural"
+
+patron_lista_sin_narrativa:
+  description: "Evitar posts que sean solo listas sin texto narrativo entre ellas"
+  min_narrative_ratio: 0.4  # al menos 40% del post debe ser párrafos, no listas
+
+transiciones_mecanicas:
+  - "Además,"
+  - "Por otro lado,"
+  - "Asimismo,"
+  - "Del mismo modo,"
+  - "De igual manera,"
+  - "En este sentido,"
+  - "En cuanto a"

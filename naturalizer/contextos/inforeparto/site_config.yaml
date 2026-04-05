@@ -1,0 +1,53 @@
+# site_config.yaml — inforeparto.com
+# Configuración específica del sitio para el pipeline multi-site.
+
+site_id: "inforeparto"
+domain: "inforeparto.com"
+wp_url: "https://inforeparto.com"
+wp_path: "/var/www/inforeparto"
+wp_db_prefix: "wp_"
+description: "Blog SEO para repartidores y riders en España"
+
+# Base de datos
+db_env_prefix: "WP"   # WP_DB_HOST, WP_DB_USER, WP_DB_PASSWORD, WP_DB_NAME
+topic_queue_table: "ir_topic_queue"
+naturalization_log_table: "ir_naturalization_log"
+affiliate_clicks_table: "ir_affiliate_clicks"
+
+# Afiliados Amazon
+affiliate_tag: "inforeparto-21"
+affiliate_catalog: "scripts/affiliate_catalog.json"  # relativo a la raíz del proyecto
+
+# GSC
+gsc_property: "https://inforeparto.com/"
+
+# Telegram
+telegram_chat_id_env: "TELEGRAM_CHAT_ID"  # variable de entorno a usar
+
+# Imágenes
+pexels_locale: "es-ES"
+pexels_language: "español repartidor"
+
+# Calendario de publicación
+post_interval_days: 3
+publish_hour_min: 8
+publish_hour_max: 20
+
+# Meta keys de WordPress
+meta_prefix: "_ir_"         # _ir_autopublished, etc.
+meta_autopublished: "_ir_autopublished"
+
+# Score mínimo para publicar (NaturalScore)
+score_threshold: 70
+
+# Guardrails de contenido (genérico, sustituye al "guardián de autónomos")
+content_guardrails:
+  - prohibited_terms: ["autónomo", "autónomos", "RETA", "cuota de autónomo", "alta autónomo"]
+    exceptions: ["amazon flex", "amazon logistics"]
+    reason: "Ley Rider RDL 9/2021: riders de plataforma son asalariados. Excepción: Amazon Flex."
+    retry_with_reinforced_brief: true
+
+# Aviso de afiliados en el post
+affiliate_disclosure: >
+  Este artículo contiene enlaces de afiliado de Amazon. Si compras a través de ellos,
+  inforeparto recibe una pequeña comisión sin coste adicional para ti.
