@@ -49,6 +49,8 @@ PROCESS_COMMANDS = {
     "publish":   [sys.executable, str(SCRIPTS_DIR / "autopublisher.py")],
     "refresh":   [sys.executable, str(SCRIPTS_DIR / "daily-refresh.py")],
     "index":     [sys.executable, str(PROJECT_DIR / "gsc-indexing" / "index_urls.py")],
+    "report":    [sys.executable, str(SCRIPTS_DIR / "performance_report.py")],
+    "enrich":    [sys.executable, str(SCRIPTS_DIR / "experience_enricher.py")],
 }
 
 PROCESS_ORDER = ["discovery", "publish", "refresh", "index"]

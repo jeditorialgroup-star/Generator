@@ -20,12 +20,14 @@ Todos los crons corren como usuario `devops`. Logs en `scripts/logs/` o `/var/lo
 |--------|--------|-------------|--------------|
 | Lunes 04:00 | `scripts/gsc-topic-discovery.py` | Detecta gaps GSC + clasificación de intención → ir_topic_queue | MariaDB, GSC API, Ollama |
 | Domingo 08:30 | `scripts/affiliate_report.py` | Reporte de clics en afiliados (top ASINs + top posts) | MariaDB, Telegram |
+| Domingo 20:00 | `scripts/performance_report.py` | Informe semanal: top CTR, oportunidades, schema stats, score evolution | MariaDB, Telegram |
 
 ## Procesos quincenales
 
 | Cuando | Script | Descripción | Dependencias |
 |--------|--------|-------------|--------------|
 | Días 1 y 15, 02:00 | `scripts/affiliate_catalog_updater.py` | Amplía catálogo de afiliados via Serper + Jina | Serper API, Jina API |
+| Días 1 y 15, 03:30 | `scripts/experience_enricher.py` | Scraping de testimonios reales de repartidores → ir_experience_bank | Serper, Jina, Anthropic (Haiku), Ollama |
 
 ## Procesos del sistema
 
@@ -49,8 +51,13 @@ gsc-topic-discovery.py (lunes)
                             → IndexNow (Bing/Yandex)
 
 daily-refresh.py (03:00)
-    → Lee posts con status publish
-    → Actualiza GSC metrics, imágenes, internal links
+    → update_all_post_performance_metrics()
+        → GSC page metrics (7d + 30d) para TODOS los posts
+        → affiliate_clicks_30d desde ir_affiliate_clicks
+        → post_performance (feedback loop)
+    → get_posts_to_refresh() por opportunity_score
+        → Lee posts con ≥100 imp, ≥60 días sin refresh
+    → Actualiza imágenes, internal links, afiliados
     → Genera post_embeddings.json (usado por gsc-topic-discovery)
 
 seo_health_check.py (11:00)
@@ -62,8 +69,20 @@ affiliate_catalog_updater.py (días 1+15)
     → genera affiliate_catalog_new.json para revisión manual
     → autopublisher.py usa affiliate_catalog.json en research phase
 
+experience_enricher.py (días 1+15)
+    → Serper search → Jina scrape → Haiku extraction
+    → Cosine dedup via Ollama (threshold 0.85)
+    → Inserta en ir_experience_bank
+    → naturalizer usa ir_experience_bank en Capa 4
+
 affiliate_report.py (domingos)
     → Lee ir_affiliate_clicks (click.php)
+    → Resumen semanal por Telegram
+
+performance_report.py (domingos 20:00)
+    → Lee post_performance
+    → Top clicks afiliado, top CTR, oportunidades CTR<2%
+    → Estadísticas por schema type, evolución natural_score
     → Resumen semanal por Telegram
 ```
 
@@ -76,6 +95,6 @@ Ver `.env.example` para la lista completa. Cargadas automáticamente via `python
 ## Notas
 
 - `autopublisher.py` incluye gate de rendimiento: no corre si ya corrió hoy (salvo `--force`)
-- `daily-refresh.py` incluye performance gate: excluye posts con `avg_position ≤ 20 AND clicks ≥ 15`
+- `daily-refresh.py` selecciona posts por `opportunity_score` (impressions×0.4 + position×0.4 + CTR_penalty×0.2); solo posts con ≥100 impresiones_30d (o sin datos GSC) y ≥60 días de antigüedad
 - `gsc-topic-discovery.py` añade columna `search_intent` a `ir_topic_queue` automáticamente si no existe
 - IndexNow key: `2f5ab127cde204cb00580fbf5f32a504` — archivo de verificación en `/var/www/inforeparto/2f5ab127cde204cb00580fbf5f32a504.txt`

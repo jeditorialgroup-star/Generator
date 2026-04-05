@@ -13,6 +13,7 @@ db_env_prefix: "WP"   # WP_DB_HOST, WP_DB_USER, WP_DB_PASSWORD, WP_DB_NAME
 topic_queue_table: "ir_topic_queue"
 naturalization_log_table: "ir_naturalization_log"
 affiliate_clicks_table: "ir_affiliate_clicks"
+post_performance_table: "post_performance"
 
 # Afiliados Amazon
 affiliate_tag: "inforeparto-21"

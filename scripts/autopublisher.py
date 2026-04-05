@@ -1187,6 +1187,47 @@ def log_to_db(title: str, wp_post_id: int, score: dict, research: dict, schema_t
         log.warning(f"  Log DB error: {e}")
 
 
+def log_post_performance(
+    wp_post_id: int,
+    keyword: str,
+    search_intent: str,
+    schema_type: str,
+    html: str,
+    score: float,
+    research: dict,
+    has_disclaimer: bool,
+    published_at,
+):
+    """Insert initial row in post_performance for a newly published post."""
+    try:
+        import re as _re
+        word_count = len(_re.sub(r"<[^>]+>", "", html).split())
+        num_affiliates = len(research.get("affiliate_products", []))
+        num_internal = len(research.get("internal_links", []))
+        num_images = html.count("<img ")
+        conn = db_connect()
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO post_performance
+               (post_id, site, keyword, search_intent, schema_type, word_count,
+                natural_score, num_affiliates, num_internal_links, num_images,
+                has_disclaimer, published_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON DUPLICATE KEY UPDATE
+               natural_score=VALUES(natural_score), schema_type=VALUES(schema_type)""",
+            (
+                wp_post_id, SITE, keyword, search_intent, schema_type, word_count,
+                score, num_affiliates, num_internal, num_images,
+                int(has_disclaimer), published_at,
+            ),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        log.warning(f"  post_performance insert error: {e}")
+
+
 def ping_sitemap():
     """Ping Google with the sitemap URL to trigger re-crawling."""
     try:
@@ -1414,6 +1455,19 @@ def main():
             if not args.dry_run:
                 log_to_db(title, wp_post_id, score, research, schema_type)
                 ping_sitemap()
+                # Record initial performance row
+                topic_row = research.get("_topic_row", {})
+                log_post_performance(
+                    wp_post_id=wp_post_id,
+                    keyword=keyword,
+                    search_intent=topic_row.get("search_intent", "informational"),
+                    schema_type=schema_type,
+                    html=naturalized,
+                    score=score_val,
+                    research=research,
+                    has_disclaimer="disclaimer" in naturalized.lower(),
+                    published_at=publish_dt,
+                )
 
             preview_url = f"{WP_URL}/?p={wp_post_id}"
             lines = [

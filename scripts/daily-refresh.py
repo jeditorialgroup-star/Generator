@@ -38,6 +38,9 @@ import requests
 import google.auth.transport.requests
 import google.oauth2.service_account
 
+sys.path.insert(0, str(Path(__file__).parent))
+from site_config import load_site_config
+
 # ── Naturalizer v4 ────────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent.parent / "naturalizer"))
 try:
@@ -51,6 +54,8 @@ except Exception as _nat_err:
 
 WP_PATH = "/var/www/inforeparto"
 WP_URL = "https://inforeparto.com"
+SITE = "inforeparto"
+GSC_SITE = "https://inforeparto.com/"
 
 DB = dict(
     host=os.environ.get("WP_DB_HOST", "localhost"),
@@ -59,8 +64,9 @@ DB = dict(
     database=os.environ.get("WP_DB_NAME", "wordpress_db"),
 )
 
-CREDENTIALS_PATH = "/home/devops/.credentials/gsc-serviceaccount.json"
+CREDENTIALS_PATH = os.environ.get("GSC_CREDENTIALS", "/home/devops/.credentials/gsc-serviceaccount.json")
 INDEXING_API = "https://indexing.googleapis.com/v3/urlNotifications:publish"
+POST_PERFORMANCE_TABLE = "post_performance"
 
 SCRIPTS_DIR = Path(__file__).parent
 LOGS_DIR = SCRIPTS_DIR / "logs"
@@ -82,13 +88,9 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", os.environ.get("ADMIN_CHAT
 
 META_KEY = "_ir_last_refresh"
 POSTS_PER_RUN = 4
-MIN_AGE_DAYS = 100         # solo actualizar posts con 100+ días sin refresh
+MIN_AGE_DAYS = 60          # solo actualizar posts con 60+ días sin refresh
 BATCH_MAX_WAIT_HOURS = 23  # si el batch lleva más de esto, lo marcamos como expirado
-
-# Performance gate: NO actualizar posts que ya están funcionando bien
-# Un post se considera "bien" si: posición <= 20 Y clicks_30d > 15
-PERF_GATE_MAX_POSITION = 35   # posición peor que esto → candidato a refresh
-PERF_GATE_MIN_CLICKS = 15     # clicks < esto Y posición < 20 → también candidato
+MIN_IMPRESSIONS_REFRESH = 100  # solo refrescar posts con ≥100 impresiones_30d (si hay datos GSC)
 
 EMBEDDINGS_CACHE_FILE = SCRIPTS_DIR / "post_embeddings.json"
 AFFILIATE_CATALOG_FILE = SCRIPTS_DIR / "affiliate_catalog.json"
@@ -137,30 +139,167 @@ def db_connect():
     return mysql.connector.connect(**DB)
 
 
+def _gsc_token() -> str:
+    """Obtain a valid OAuth2 access token for GSC API."""
+    creds = google.oauth2.service_account.Credentials.from_service_account_file(
+        CREDENTIALS_PATH, scopes=["https://www.googleapis.com/auth/webmasters.readonly"]
+    )
+    creds.refresh(google.auth.transport.requests.Request())
+    return creds.token
+
+
+def fetch_gsc_page_metrics(days: int) -> dict:
+    """
+    Fetch clicks/impressions/position/ctr per URL from GSC for the last N days.
+    Returns {url: {clicks, impressions, avg_position, ctr}}.
+    """
+    try:
+        token = _gsc_token()
+        end = date.today()
+        start = end - timedelta(days=days)
+        resp = requests.post(
+            f"https://www.googleapis.com/webmasters/v3/sites/{GSC_SITE.replace('/', '%2F')}/searchAnalytics/query",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={
+                "startDate": start.isoformat(),
+                "endDate": end.isoformat(),
+                "dimensions": ["page"],
+                "rowLimit": 1000,
+            },
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            log.warning(f"GSC page metrics error {resp.status_code}: {resp.text[:200]}")
+            return {}
+        result = {}
+        for row in resp.json().get("rows", []):
+            url = row["keys"][0].rstrip("/") + "/"
+            result[url] = {
+                "clicks": int(row.get("clicks", 0)),
+                "impressions": int(row.get("impressions", 0)),
+                "avg_position": round(row.get("position", 0), 1),
+                "ctr": round(row.get("ctr", 0) * 100, 2),
+            }
+        return result
+    except Exception as e:
+        log.warning(f"fetch_gsc_page_metrics({days}d) error: {e}")
+        return {}
+
+
+def update_all_post_performance_metrics(dry_run=False):
+    """
+    Daily: update post_performance with fresh GSC metrics (7d + 30d) and affiliate_clicks_30d.
+    Runs for ALL published posts, not just the ones being refreshed.
+    """
+    log.info("Actualizando métricas en post_performance...")
+    metrics_7d = fetch_gsc_page_metrics(7)
+    metrics_30d = fetch_gsc_page_metrics(30)
+    log.info(f"  GSC: {len(metrics_7d)} URLs (7d) / {len(metrics_30d)} URLs (30d)")
+
+    conn = db_connect()
+    cur = conn.cursor(dictionary=True)
+
+    # Get all published posts with their URLs
+    cur.execute(
+        "SELECT ID, post_name FROM wp_posts WHERE post_status = 'publish' AND post_type = 'post'"
+    )
+    posts = cur.fetchall()
+
+    # Get affiliate clicks per post for last 30 days
+    cur.execute(
+        f"""SELECT post_id, COUNT(*) as clicks
+            FROM ir_affiliate_clicks
+            WHERE clicked_at >= NOW() - INTERVAL 30 DAY
+            GROUP BY post_id"""
+    )
+    aff_clicks = {row["post_id"]: row["clicks"] for row in cur.fetchall()}
+
+    updated = 0
+    for post in posts:
+        post_id = post["ID"]
+        slug = post["post_name"]
+        url = f"{WP_URL}/{slug}/"
+
+        m7 = metrics_7d.get(url, {})
+        m30 = metrics_30d.get(url, {})
+        aff = aff_clicks.get(post_id, 0)
+
+        # Only update if we have any data to update
+        if not m7 and not m30 and not aff:
+            continue
+
+        if dry_run:
+            updated += 1
+            continue
+
+        cur.execute(
+            f"""INSERT INTO {POST_PERFORMANCE_TABLE}
+                (post_id, site, keyword, impressions_7d, clicks_7d, avg_position_7d, ctr_7d,
+                 impressions_30d, clicks_30d, avg_position_30d, ctr_30d, affiliate_clicks_30d,
+                 last_gsc_update)
+                VALUES (%s, %s, '', %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON DUPLICATE KEY UPDATE
+                  impressions_7d=VALUES(impressions_7d),
+                  clicks_7d=VALUES(clicks_7d),
+                  avg_position_7d=VALUES(avg_position_7d),
+                  ctr_7d=VALUES(ctr_7d),
+                  impressions_30d=VALUES(impressions_30d),
+                  clicks_30d=VALUES(clicks_30d),
+                  avg_position_30d=VALUES(avg_position_30d),
+                  ctr_30d=VALUES(ctr_30d),
+                  affiliate_clicks_30d=VALUES(affiliate_clicks_30d),
+                  last_gsc_update=NOW()""",
+            (
+                post_id, SITE,
+                m7.get("impressions", None), m7.get("clicks", None),
+                m7.get("avg_position", None), m7.get("ctr", None),
+                m30.get("impressions", None), m30.get("clicks", None),
+                m30.get("avg_position", None), m30.get("ctr", None),
+                aff if aff else None,
+            )
+        )
+        updated += 1
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    log.info(f"  post_performance: {updated} filas actualizadas {'[dry-run]' if dry_run else ''}")
+
+
 def get_posts_to_refresh(limit=POSTS_PER_RUN):
     """
-    Posts >MIN_AGE_DAYS sin refresh que NO están rindiendo bien.
-    Performance gate: excluye posts con avg_position <= 20 Y clicks >= PERF_GATE_MIN_CLICKS.
-    Posts sin métricas GSC siempre se incluyen (no hay datos para protegerlos).
+    Select posts for refresh using opportunity_score.
+    Criteria:
+    - Published ≥ MIN_AGE_DAYS ago without recent refresh
+    - If GSC data exists: impressions_30d >= MIN_IMPRESSIONS_REFRESH
+    - Posts without GSC data are always eligible (no data to filter on)
+    - Ordered by opportunity_score DESC (high impressions + bad position + low CTR)
     """
     cutoff = (datetime.now() - timedelta(days=MIN_AGE_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
     conn = db_connect()
     cur = conn.cursor()
     cur.execute(f"""
-        SELECT p.ID
+        SELECT p.ID,
+          COALESCE(pp.impressions_30d, 0) as imp30,
+          COALESCE(pp.clicks_30d, 0) as clk30,
+          COALESCE(pp.avg_position_30d, 50) as pos30,
+          COALESCE(pp.ctr_30d, 0) as ctr30,
+          (
+            LEAST(1.0, COALESCE(pp.impressions_30d, 0) / 500.0) * 0.4 +
+            LEAST(1.0, GREATEST(0, (COALESCE(pp.avg_position_30d, 50) - 10) / 40.0)) * 0.4 +
+            GREATEST(0, 1 - COALESCE(pp.ctr_30d, 0) / 5.0) * 0.2
+          ) AS opportunity_score
         FROM wp_posts p
         LEFT JOIN wp_postmeta m ON m.post_id = p.ID AND m.meta_key = '{META_KEY}'
-        LEFT JOIN ir_naturalization_log nl ON nl.wp_post_id = p.ID
-            AND nl.metrics_updated_at IS NOT NULL
+        LEFT JOIN {POST_PERFORMANCE_TABLE} pp ON pp.post_id = p.ID AND pp.site = '{SITE}'
         WHERE p.post_status = 'publish'
           AND p.post_type = 'post'
           AND GREATEST(p.post_date, p.post_modified) < %s
-          AND NOT (
-            nl.avg_position IS NOT NULL
-            AND nl.avg_position <= 20
-            AND nl.pageviews_30d >= {PERF_GATE_MIN_CLICKS}
+          AND (
+            pp.impressions_30d IS NULL
+            OR pp.impressions_30d >= {MIN_IMPRESSIONS_REFRESH}
           )
-        ORDER BY COALESCE(m.meta_value, '0') ASC, p.post_date ASC
+        ORDER BY opportunity_score DESC, COALESCE(m.meta_value, '0') ASC
         LIMIT %s
     """, (cutoff, limit))
     rows = [r[0] for r in cur.fetchall()]
@@ -739,11 +878,15 @@ def phase_b_apply(state, dry_run=False):
             continue
 
         # Naturalizer v4 — Capas 1+2+3+3b+7+8
+        score_before = None
+        score_after = None
         if NATURALIZER_AVAILABLE:
             try:
                 nat = _naturalize_v4(content, meta['title'], site="inforeparto", post_id=post_id)
+                score_before = nat.get('score_before', {}).get('overall') if nat.get('score_before') else None
                 content = nat['content']
-                ns = nat['score']['overall']
+                score_after = nat['score']['overall']
+                ns = score_after
                 status = "⚠️ REVISAR" if nat['needs_review'] else "✅"
                 log.info(f"  NaturalScore: {ns}/100 {status}")
                 if nat.get('experiences_used'):
@@ -788,6 +931,26 @@ def phase_b_apply(state, dry_run=False):
         # Meta
         if not dry_run:
             set_post_meta(post_id, META_KEY, datetime.now().isoformat())
+            # Log natural scores to post_performance
+            if score_before is not None or score_after is not None:
+                try:
+                    _conn = db_connect()
+                    _cur = _conn.cursor()
+                    _cur.execute(
+                        f"""INSERT INTO {POST_PERFORMANCE_TABLE} (post_id, site, keyword)
+                            VALUES (%s, %s, '')
+                            ON DUPLICATE KEY UPDATE
+                              natural_score_before=COALESCE(%s, natural_score_before),
+                              natural_score_after=COALESCE(%s, natural_score_after),
+                              natural_score=COALESCE(%s, natural_score),
+                              last_refresh_at=NOW()""",
+                        (post_id, SITE, score_before, score_after, score_after)
+                    )
+                    _conn.commit()
+                    _cur.close()
+                    _conn.close()
+                except Exception as _e:
+                    log.warning(f"  post_performance score update error: {_e}")
 
         applied.append({
             "post_id": post_id,
@@ -826,17 +989,34 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--check", action="store_true", help="Solo comprobar batch pendiente")
+    parser.add_argument("--site", type=str, default="inforeparto", help="Site ID (default: inforeparto)")
     args = parser.parse_args()
 
-    global ANTHROPIC_API_KEY, PEXELS_API_KEY
+    global ANTHROPIC_API_KEY, PEXELS_API_KEY, WP_PATH, WP_URL, SITE, GSC_SITE, DB, POST_PERFORMANCE_TABLE
     ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
     PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
+
+    try:
+        cfg = load_site_config(args.site)
+        SITE = cfg["site_id"]
+        WP_PATH = cfg["wp_path"]
+        WP_URL = cfg["wp_url"]
+        GSC_SITE = cfg.get("gsc_property", GSC_SITE)
+        DB = cfg["db"]
+        POST_PERFORMANCE_TABLE = cfg.get("post_performance_table", POST_PERFORMANCE_TABLE)
+        log.info(f"Site: {SITE} ({cfg.get('domain', '')})")
+    except FileNotFoundError as e:
+        log.error(str(e))
+        sys.exit(1)
 
     if not ANTHROPIC_API_KEY:
         log.error("ANTHROPIC_API_KEY no encontrada")
         sys.exit(1)
 
     log.info(f"{'[DRY-RUN] ' if args.dry_run else ''}Daily refresh — {date.today().isoformat()}")
+
+    # Always update GSC metrics for all posts (feedback loop data)
+    update_all_post_performance_metrics(dry_run=args.dry_run)
 
     state = load_batch_state()
 
