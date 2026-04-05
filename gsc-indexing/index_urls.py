@@ -27,6 +27,10 @@ from dotenv import load_dotenv
 load_dotenv(Path.home() / ".env.projects", override=False)
 
 import os
+import sys
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+from site_config import load_site_config
 
 CREDENTIALS_PATH = os.environ.get("GSC_CREDENTIALS", "/home/devops/.credentials/gsc-serviceaccount.json")
 SCOPES = ["https://www.googleapis.com/auth/indexing"]
@@ -126,7 +130,18 @@ def main():
     parser = argparse.ArgumentParser(description="Notify Google Indexing API for WP posts")
     parser.add_argument("--post-id", type=int, help="Index a single post by WP ID")
     parser.add_argument("--all-recent", type=int, default=10, help="Number of recent posts to index")
+    parser.add_argument("--site", type=str, default="inforeparto", help="Site ID (default: inforeparto)")
     args = parser.parse_args()
+
+    global WP_PATH, WP_URL
+    try:
+        cfg = load_site_config(args.site)
+        WP_PATH = cfg["wp_path"]
+        WP_URL = cfg["wp_url"]
+        log.info(f"Site: {cfg['site_id']} ({cfg.get('domain', '')})")
+    except FileNotFoundError as e:
+        log.error(str(e))
+        sys.exit(1)
 
     post_ids = [args.post_id] if args.post_id else None
     limit = args.all_recent

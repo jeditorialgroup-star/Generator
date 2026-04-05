@@ -30,12 +30,17 @@ from dotenv import load_dotenv
 # Cargar .env.projects antes de leer cualquier variable de entorno
 load_dotenv(Path.home() / ".env.projects", override=False)
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# site_config loader (multi-site)
+sys.path.insert(0, str(Path(__file__).parent))
+from site_config import load_site_config
+
+# ── Config (defaults — overridden per site) ───────────────────────────────────
 
 CREDENTIALS_PATH = os.environ.get("GSC_CREDENTIALS", "/home/devops/.credentials/gsc-serviceaccount.json")
 GSC_SITE = "https://inforeparto.com/"
 WP_URL = "https://inforeparto.com"
 SITE = "inforeparto"
+TOPIC_QUEUE_TABLE = "ir_topic_queue"
 
 DB = dict(
     host=os.environ.get("WP_DB_HOST", "localhost"),
@@ -94,7 +99,7 @@ def ensure_search_intent_column(conn):
     cur = conn.cursor()
     try:
         cur.execute(
-            "ALTER TABLE ir_topic_queue ADD COLUMN search_intent VARCHAR(30) DEFAULT 'informational'"
+            f"ALTER TABLE {TOPIC_QUEUE_TABLE} ADD COLUMN search_intent VARCHAR(30) DEFAULT 'informational'"
         )
         conn.commit()
         log.info("  Columna search_intent añadida a ir_topic_queue")
@@ -106,7 +111,7 @@ def ensure_search_intent_column(conn):
 def get_existing_keywords(conn) -> set:
     """Keywords ya en la cola (cualquier estado)."""
     cur = conn.cursor()
-    cur.execute("SELECT keyword FROM ir_topic_queue WHERE site = %s", (SITE,))
+    cur.execute(f"SELECT keyword FROM {TOPIC_QUEUE_TABLE} WHERE site = %s", (SITE,))
     keywords = {row[0].lower() for row in cur.fetchall()}
     cur.close()
     return keywords
@@ -163,7 +168,7 @@ def insert_topics(conn, topics: list[dict], dry_run: bool) -> int:
     for t in topics:
         try:
             cur.execute(
-                """INSERT IGNORE INTO ir_topic_queue
+                f"""INSERT IGNORE INTO {TOPIC_QUEUE_TABLE}
                    (site, keyword, source, priority, gsc_impressions, gsc_avg_position, search_intent)
                    VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                 (
@@ -318,7 +323,20 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--days", type=int, default=90)
     parser.add_argument("--min-impressions", type=int, default=MIN_IMPRESSIONS)
+    parser.add_argument("--site", type=str, default="inforeparto", help="Site ID (default: inforeparto)")
     args = parser.parse_args()
+
+    global SITE, GSC_SITE, DB, TOPIC_QUEUE_TABLE
+    try:
+        cfg = load_site_config(args.site)
+        SITE = cfg["site_id"]
+        GSC_SITE = cfg.get("gsc_property", GSC_SITE)
+        DB = cfg["db"]
+        TOPIC_QUEUE_TABLE = cfg.get("topic_queue_table", TOPIC_QUEUE_TABLE)
+        log.info(f"Site: {SITE} ({cfg.get('domain', '')})")
+    except FileNotFoundError as e:
+        log.error(str(e))
+        sys.exit(1)
 
     prefix = "[DRY-RUN] " if args.dry_run else ""
     log.info(f"{prefix}GSC Topic Discovery — {date.today().isoformat()}")

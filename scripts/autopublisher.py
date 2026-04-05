@@ -59,11 +59,11 @@ except Exception as _nat_err:
     NATURALIZER_AVAILABLE = False
     _nat_err_msg = str(_nat_err)
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# ── Config (defaults — overridden per-site in main()) ─────────────────────────
 
+SITE = "inforeparto"
 WP_PATH = "/var/www/inforeparto"
 WP_URL = "https://inforeparto.com"
-SITE = "inforeparto"
 
 DB = dict(
     host=os.environ.get("WP_DB_HOST", "localhost"),
@@ -94,11 +94,47 @@ log = logging.getLogger(__name__)
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 
-# Publish schedule
+# Publish schedule (overridden by site_config)
 DAYS_BETWEEN_POSTS = 3
 PUBLISH_HOUR_MIN = 8
 PUBLISH_HOUR_MAX = 20
 SCORE_THRESHOLD = 70
+META_AUTOPUBLISHED = "_ir_autopublished"
+TOPIC_QUEUE_TABLE = "ir_topic_queue"
+NATURALIZATION_LOG_TABLE = "ir_naturalization_log"
+AFFILIATE_TAG = "inforeparto-21"
+AFFILIATE_DISCLOSURE = (
+    "Este artículo contiene enlaces de afiliado de Amazon. "
+    "Si compras a través de ellos, inforeparto recibe una pequeña comisión sin coste adicional para ti."
+)
+
+
+def apply_site_config(cfg: dict):
+    """Override module-level globals with values from site_config.yaml."""
+    global SITE, WP_PATH, WP_URL, DB, TELEGRAM_CHAT_ID
+    global DAYS_BETWEEN_POSTS, PUBLISH_HOUR_MIN, PUBLISH_HOUR_MAX, SCORE_THRESHOLD
+    global META_AUTOPUBLISHED, TOPIC_QUEUE_TABLE, NATURALIZATION_LOG_TABLE
+    global AFFILIATE_CATALOG_FILE, AFFILIATE_TAG, AFFILIATE_DISCLOSURE
+    global EDITORIAL_RULES_FILE, _GENERATION_SYSTEM
+
+    SITE = cfg["site_id"]
+    WP_PATH = cfg["wp_path"]
+    WP_URL = cfg["wp_url"]
+    DB = cfg["db"]
+    TELEGRAM_CHAT_ID = cfg.get("telegram_chat_id", TELEGRAM_CHAT_ID)
+    DAYS_BETWEEN_POSTS = cfg.get("post_interval_days", DAYS_BETWEEN_POSTS)
+    PUBLISH_HOUR_MIN = cfg.get("publish_hour_min", PUBLISH_HOUR_MIN)
+    PUBLISH_HOUR_MAX = cfg.get("publish_hour_max", PUBLISH_HOUR_MAX)
+    SCORE_THRESHOLD = cfg.get("score_threshold", SCORE_THRESHOLD)
+    META_AUTOPUBLISHED = cfg.get("meta_autopublished", META_AUTOPUBLISHED)
+    TOPIC_QUEUE_TABLE = cfg.get("topic_queue_table", TOPIC_QUEUE_TABLE)
+    NATURALIZATION_LOG_TABLE = cfg.get("naturalization_log_table", NATURALIZATION_LOG_TABLE)
+    AFFILIATE_TAG = cfg.get("affiliate_tag") or ""
+    AFFILIATE_DISCLOSURE = cfg.get("affiliate_disclosure") or ""
+    if cfg.get("affiliate_catalog_path"):
+        AFFILIATE_CATALOG_FILE = Path(cfg["affiliate_catalog_path"])
+    EDITORIAL_RULES_FILE = NATURALIZER_DIR / "contextos" / SITE / "editorial_rules.yaml"
+    _GENERATION_SYSTEM = _build_generation_system(cfg)
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
 
@@ -120,11 +156,11 @@ def db_connect():
 
 
 def get_next_topic(conn) -> dict | None:
-    """Get highest-priority pending topic from ir_topic_queue."""
+    """Get highest-priority pending topic from the site's topic queue."""
     cur = conn.cursor(dictionary=True)
     cur.execute(
-        """SELECT id, keyword, source, priority, gsc_impressions, gsc_avg_position
-           FROM ir_topic_queue
+        f"""SELECT id, keyword, source, priority, gsc_impressions, gsc_avg_position
+           FROM {TOPIC_QUEUE_TABLE}
            WHERE site = %s AND status = 'pending'
            ORDER BY priority DESC, created_at ASC
            LIMIT 1""",
@@ -137,9 +173,7 @@ def get_next_topic(conn) -> dict | None:
 
 def mark_topic_in_progress(conn, topic_id: int):
     cur = conn.cursor()
-    cur.execute(
-        "UPDATE ir_topic_queue SET status='in_progress' WHERE id=%s", (topic_id,)
-    )
+    cur.execute(f"UPDATE {TOPIC_QUEUE_TABLE} SET status='in_progress' WHERE id=%s", (topic_id,))
     conn.commit()
     cur.close()
 
@@ -147,7 +181,7 @@ def mark_topic_in_progress(conn, topic_id: int):
 def mark_topic_done(conn, topic_id: int, wp_post_id: int):
     cur = conn.cursor()
     cur.execute(
-        "UPDATE ir_topic_queue SET status='done', processed_at=NOW(), wp_post_id=%s WHERE id=%s",
+        f"UPDATE {TOPIC_QUEUE_TABLE} SET status='done', processed_at=NOW(), wp_post_id=%s WHERE id=%s",
         (wp_post_id, topic_id),
     )
     conn.commit()
@@ -158,7 +192,7 @@ def mark_topic_pending(conn, topic_id: int, note: str = ""):
     """Reset to pending on failure."""
     cur = conn.cursor()
     cur.execute(
-        "UPDATE ir_topic_queue SET status='pending', notes=%s WHERE id=%s",
+        f"UPDATE {TOPIC_QUEUE_TABLE} SET status='pending', notes=%s WHERE id=%s",
         (note[:500], topic_id),
     )
     conn.commit()
@@ -177,8 +211,9 @@ def get_last_scheduled_date(conn) -> datetime | None:
         """SELECT MAX(p.post_date)
            FROM wp_posts p
            INNER JOIN wp_postmeta m ON m.post_id = p.ID
-               AND m.meta_key = '_ir_autopublished' AND m.meta_value = '1'
-           WHERE p.post_status IN ('publish', 'future') AND p.post_type = 'post'"""
+               AND m.meta_key = %s AND m.meta_value = '1'
+           WHERE p.post_status IN ('publish', 'future') AND p.post_type = 'post'""",
+        (META_AUTOPUBLISHED,),
     )
     row = cur.fetchone()
     cur.close()
@@ -708,7 +743,8 @@ def build_brief(keyword: str, research: dict) -> str:
         parts.append("═══════════════════════════════════════")
         parts.append("Formato enlace: <a href=\"https://www.amazon.es/dp/ASIN/ref=nosim?tag=inforeparto-21\" target=\"_blank\" rel=\"nofollow noopener\">nombre del producto</a>")
         parts.append("Si añades afiliados, incluye este aviso ANTES del primer H2:")
-        parts.append('<p class="aviso-afiliados"><em>Este artículo contiene enlaces de afiliado de Amazon. Si compras a través de ellos, inforeparto recibe una pequeña comisión sin coste adicional para ti.</em></p>')
+        if AFFILIATE_DISCLOSURE:
+            parts.append(f'<p class="aviso-afiliados"><em>{AFFILIATE_DISCLOSURE}</em></p>')
         for p in research["affiliate_products"]:
             parts.append(f'  • {p["name"]} (ASIN: {p["asin"]}) — keywords: {", ".join(p.get("keywords", [])[:3])}')
 
@@ -717,7 +753,7 @@ def build_brief(keyword: str, research: dict) -> str:
 
 # ── Generation prompt ─────────────────────────────────────────────────────────
 
-_GENERATION_SYSTEM = """Eres el editor de inforeparto.com, blog para repartidores y riders en España.
+_GENERATION_SYSTEM_INFOREPARTO = """Eres el editor de inforeparto.com, blog para repartidores y riders en España.
 
 Tu misión es escribir un artículo SEO completo, útil y completamente original sobre el tema indicado.
 
@@ -732,27 +768,73 @@ ESTRUCTURA DEL POST:
 - Intro: 2-3 frases de gancho. PROHIBIDO empezar con definición, "En este artículo..." o generalización
   Usa: escena concreta / dato sorprendente / pregunta provocadora / afirmación contraintuitiva
 - H2/H3: naturales, como lo explicaría un colega (no roboticos)
-- Longitud: 900-1300 palabras. Posts concisos y útiles > posts relleno. Si puedes decirlo en 1000 palabras, no uses 1500.
+- Longitud: 900-1300 palabras. Posts concisos y útiles > posts relleno.
 - 1-2 listas con viñetas máximo por post; el resto narrativa
 - Cierre con CTA concreto (no "esperamos que te haya ayudado")
 
 CONTENIDO:
 - Usa los datos y fuentes del brief (cítalos de forma natural, sin notas al pie)
 - Integra 1-2 experiencias reales del brief donde encajen
-- Añade los productos afiliados en el PRIMER TERCIO del post (sección de recomendaciones o párrafo de consejo)
-- Enlaza internamente los posts del brief donde sea natural (no forzar)
+- Añade los productos afiliados en el PRIMER TERCIO del post
+- Enlaza internamente los posts del brief donde sea natural
 - NO inventar datos, cifras o normativas que no estén en el brief
 
 RESTRICCIÓN LEGAL ABSOLUTA:
-- NUNCA mencionar "autónomo", "autónomos", "RETA", "cuota de autónomo", "darse de alta como autónomo" en relación a riders de plataforma (Glovo, Uber Eats, Just Eat, Deliveroo, Stuart).
+- NUNCA mencionar "autónomo", "autónomos", "RETA", "cuota de autónomo" en relación a riders de plataforma.
   Motivo: la Ley Rider (RDL 9/2021) los clasifica como trabajadores asalariados.
-  Excepción única: Amazon Flex / Amazon Logistics (sí son autónomos — puedes mencionarlo si el tema lo requiere).
-- Si el tema toca fiscalidad, hazlo siempre desde la perspectiva de trabajador asalariado (IRPF en nómina, deducciones como empleado), nunca como autónomo.
+  Excepción única: Amazon Flex / Amazon Logistics.
 
 FORMATO DE SALIDA:
 - HTML completo (h1, h2, h3, p, ul/li, strong, a)
 - Sin explicaciones previas, sin markdown, sin bloques de código
 - NO incluir <h1> — el título ya lo gestiona WordPress. Empieza directamente con el primer párrafo o <h2>"""
+
+# Active generation system — overridden per site in apply_site_config()
+_GENERATION_SYSTEM = _GENERATION_SYSTEM_INFOREPARTO
+
+
+def _build_generation_system(site_cfg: dict) -> str:
+    """Build the generation system prompt from site voice config or use the default."""
+    voice_path = NATURALIZER_DIR / "contextos" / site_cfg["site_id"] / "voz.md"
+    guardrails_text = ""
+    for guardrail in site_cfg.get("content_guardrails", []):
+        terms = ", ".join(f'"{t}"' for t in guardrail["prohibited_terms"])
+        exc = guardrail.get("exceptions", [])
+        exc_text = f" Excepción: {', '.join(exc)}." if exc else ""
+        guardrails_text += f"\n- PROHIBIDO usar: {terms}.{exc_text} Motivo: {guardrail['reason']}"
+
+    domain = site_cfg.get("domain", "")
+    description = site_cfg.get("description", "")
+
+    base = f"""Eres el editor de {domain}, {description}.
+
+Tu misión es escribir un artículo SEO completo, útil y completamente original sobre el tema indicado.
+"""
+    if voice_path.exists():
+        base += f"\nVOZ EDITORIAL:\n{voice_path.read_text()}\n"
+
+    base += """
+ESTRUCTURA DEL POST:
+- H1: título optimizado (no más de 65 chars), con keyword principal
+- Intro: 2-3 frases de gancho. PROHIBIDO empezar con definición o "En este artículo..."
+- H2/H3: naturales y conversacionales
+- Longitud: 900-1300 palabras
+- Cierre con CTA concreto
+
+CONTENIDO:
+- Usa los datos y fuentes del brief
+- NO inventar datos, cifras o normativas que no estén en el brief
+"""
+    if guardrails_text:
+        base += f"\nRESTRICCIONES OBLIGATORIAS:{guardrails_text}\n"
+
+    base += """
+FORMATO DE SALIDA:
+- HTML completo (h1, h2, h3, p, ul/li, strong, a)
+- Sin explicaciones previas, sin markdown, sin bloques de código
+- NO incluir <h1> — el título ya lo gestiona WordPress. Empieza con el primer párrafo o <h2>"""
+
+    return base
 
 
 def generate_post(keyword: str, brief: str, settings: dict, api_key: str) -> str:
@@ -809,7 +891,7 @@ def publish_to_wp(title: str, content: str, publish_dt: datetime, dry_run: bool)
         post_id = int(result.stdout.strip())
         # Mark as autopublisher post so the calendar only tracks its own series
         subprocess.run(
-            ["wp", "post", "meta", "add", str(post_id), "_ir_autopublished", "1",
+            ["wp", "post", "meta", "add", str(post_id), META_AUTOPUBLISHED, "1",
              f"--path={WP_PATH}"],
             capture_output=True,
         )
@@ -949,7 +1031,7 @@ def build_schema_jsonld(schema_type: str, html: str, title: str, url: str) -> st
             "url": url,
             "publisher": {
                 "@type": "Organization",
-                "name": "inforeparto.com",
+                "name": WP_URL.replace("https://", "").replace("http://", ""),
                 "url": WP_URL,
             },
         }
@@ -1088,7 +1170,7 @@ def log_to_db(title: str, wp_post_id: int, score: dict, research: dict, schema_t
         experiences_used = [e["content"][:60] for e in research.get("experiences", [])]
         sources_added = [s.get("url", "") for s in research.get("sources", [])]
         cur.execute(
-            """INSERT INTO ir_naturalization_log
+            f"""INSERT INTO {NATURALIZATION_LOG_TABLE}
                (site, topic, wp_post_id, score_after, experiences_used, sources_added, schema_type)
                VALUES (%s, %s, %s, %s, %s, %s, %s)""",
             (
@@ -1126,7 +1208,18 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true", help="Generate even if already ran today")
     parser.add_argument("--topic", type=str, default=None, help="Override topic selection")
+    parser.add_argument("--site", type=str, default="inforeparto", help="Site ID (default: inforeparto)")
     args = parser.parse_args()
+
+    # Load and apply site-specific configuration
+    from site_config import load_site_config
+    try:
+        site_cfg = load_site_config(args.site)
+        apply_site_config(site_cfg)
+        log.info(f"Site config cargado: {args.site} ({site_cfg.get('domain', '')})")
+    except FileNotFoundError as e:
+        log.error(str(e))
+        sys.exit(1)
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
@@ -1200,23 +1293,22 @@ def main():
     brief = build_brief(keyword, research)
     log.info(f"Brief construido ({len(brief)} chars)")
 
-    # ── Generate post (with autónomos retry) ─────────────────────────────────
+    # ── Generate post (with content_guardrails retry) ────────────────────────
     log.info("Generando post (Sonnet)...")
     settings, _, _ = load_config()
     raw_html = None
-    _AUTONOMO_TERMS = ["autónomo", "autónomos", "reta", "cuota de autónomo"]
+    guardrails = site_cfg.get("content_guardrails", [])
 
     for attempt in range(2):
         try:
             _brief = brief
-            if attempt == 1:
-                log.warning("  Retry: añadiendo refuerzo anti-autónomos al brief")
-                _brief = (
-                    "⚠️ RESTRICCIÓN CRÍTICA: Este artículo NO debe mencionar en ningún caso "
-                    "las palabras 'autónomo', 'autónomos', 'RETA' ni 'cuota de autónomo'. "
-                    "Los riders de plataforma son trabajadores asalariados (Ley Rider RDL 9/2021). "
-                    "Trata toda la fiscalidad y coberturas desde el punto de vista del asalariado.\n\n"
-                ) + brief
+            if attempt == 1 and guardrails:
+                reinforcement = "⚠️ RESTRICCIONES CRÍTICAS que debes cumplir estrictamente:\n"
+                for g in guardrails:
+                    terms_str = ", ".join(f'"{t}"' for t in g["prohibited_terms"])
+                    reinforcement += f"- PROHIBIDO usar: {terms_str}. {g['reason']}\n"
+                log.warning("  Retry: añadiendo refuerzo de guardrails al brief")
+                _brief = reinforcement + "\n" + brief
             raw_html = generate_post(keyword, _brief, settings, api_key)
         except Exception as e:
             log.error(f"Error en generación (intento {attempt+1}): {e}")
@@ -1227,14 +1319,22 @@ def main():
             telegram_send(f"❌ <b>Autopublisher error</b>\nTema: {keyword}\nFallo: generación\n{e}")
             sys.exit(1)
 
-        content_lower_check = raw_html.lower()
-        autonomo_hits = [w for w in _AUTONOMO_TERMS if w in content_lower_check]
-        if not autonomo_hits or "amazon flex" in content_lower_check or "amazon logistics" in content_lower_check:
+        # Check all guardrails
+        content_lower = raw_html.lower()
+        violations = []
+        for guardrail in guardrails:
+            hits = [t for t in guardrail["prohibited_terms"] if t.lower() in content_lower]
+            if hits:
+                exceptions = guardrail.get("exceptions", [])
+                if not any(exc.lower() in content_lower for exc in exceptions):
+                    violations.append((hits, guardrail["reason"], guardrail.get("retry_with_reinforced_brief", True)))
+
+        if not violations:
             break  # Clean — proceed
         if attempt == 0:
-            log.warning(f"  Intento 1: autónomos detectado ({autonomo_hits}), reintentando...")
+            log.warning(f"  Intento 1: guardrail violation {[v[0] for v in violations]}, reintentando...")
         else:
-            reason = f"Contenido menciona {autonomo_hits} tras 2 intentos (Ley Rider)"
+            reason = f"Guardrail violation tras 2 intentos: {[v[0] for v in violations]}"
             log.error(f"BLOQUEADO: {reason}")
             if topic_id:
                 conn = db_connect()
