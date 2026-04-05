@@ -1,39 +1,26 @@
-# CRON_SCHEDULE — inforeparto.com
+# CRON_SCHEDULE — Pipeline SEO (referencia definitiva)
 
 Todos los crons corren como usuario `devops`. Logs en `scripts/logs/` o `/var/log/projects/`.
 
 ---
 
-## Procesos diarios
+## Tabla maestra de cron jobs
 
-| Hora  | Script | Descripción | Dependencias |
-|-------|--------|-------------|--------------|
-| 03:00 | `scripts/daily-refresh.py` | Refresca posts existentes: GSC data, imágenes, embeddings, afiliados | MariaDB, Anthropic API (Batch), Pexels, Ollama |
-| 04:00 | `naturalizer/scripts/update_metrics.py` | Actualiza métricas de naturalización en ir_naturalization_log | MariaDB |
-| 05:00 | `scripts/autopublisher.py` | Genera y programa un nuevo post SEO | MariaDB, Anthropic API, Serper, Jina, Pexels, Ollama |
-| 10:00 | `gsc-indexing/index_urls.py` | Notifica Google Indexing API + IndexNow para posts publicados | GSC Service Account, IndexNow key |
-| 11:00 | `scripts/seo_health_check.py` | Verifica sitemap, 404s, canonicals, meta descriptions | MariaDB, HTTP |
+| Hora  | Frecuencia  | Script                              | Descripción                                  |
+|-------|-------------|--------------------------------------|----------------------------------------------|
+| 02:00 | Quincenal   | `affiliate_catalog_updater.py`       | Actualiza catálogo de afiliados              |
+| 02:00 | Diario      | `infra/backup-scripts/backup-db.sh`  | Backup MariaDB + PostgreSQL                  |
+| 02:30 | Quincenal   | `experience_enricher.py`             | Enriquece ExperienceDB con testimonios reales|
+| 03:00 | Diario      | `daily-refresh.py --site X`          | Refresca posts con bajo rendimiento (opportunity_score) |
+| 04:00 | Lunes       | `gsc-topic-discovery.py --site X`    | Descubre nuevos temas desde GSC              |
+| 05:00 | Diario      | `autopublisher.py --site X`          | Genera y programa post nuevo                 |
+| 10:00 | Diario      | `gsc-indexing/index_urls.py --site X`| Notifica Google/Bing de URLs nuevas          |
+| 11:00 | Diario      | `seo_health_check.py`                | Verifica salud SEO técnica                   |
+| 08:30 | Domingos    | `affiliate_report.py`                | Reporte semanal de clicks de afiliado        |
+| 20:00 | Domingos    | `performance_report.py`              | Reporte semanal de rendimiento completo      |
+| —     | WP Hook     | `ir-auto-index.php` (mu-plugin)      | Indexa post al transicionar future→publish   |
 
-## Procesos semanales
-
-| Cuando | Script | Descripción | Dependencias |
-|--------|--------|-------------|--------------|
-| Lunes 04:00 | `scripts/gsc-topic-discovery.py` | Detecta gaps GSC + clasificación de intención → ir_topic_queue | MariaDB, GSC API, Ollama |
-| Domingo 08:30 | `scripts/affiliate_report.py` | Reporte de clics en afiliados (top ASINs + top posts) | MariaDB, Telegram |
-| Domingo 20:00 | `scripts/performance_report.py` | Informe semanal: top CTR, oportunidades, schema stats, score evolution | MariaDB, Telegram |
-
-## Procesos quincenales
-
-| Cuando | Script | Descripción | Dependencias |
-|--------|--------|-------------|--------------|
-| Días 1 y 15, 02:00 | `scripts/affiliate_catalog_updater.py` | Amplía catálogo de afiliados via Serper + Jina | Serper API, Jina API |
-| Días 1 y 15, 03:30 | `scripts/experience_enricher.py` | Scraping de testimonios reales de repartidores → ir_experience_bank | Serper, Jina, Anthropic (Haiku), Ollama |
-
-## Procesos del sistema
-
-| Hora | Script | Descripción |
-|------|--------|-------------|
-| 02:00 | `infra/backup-scripts/backup-db.sh` | Backup diario de MariaDB y PostgreSQL |
+> Nota: los quincenal corren los días 1 y 15 de cada mes.
 
 ---
 

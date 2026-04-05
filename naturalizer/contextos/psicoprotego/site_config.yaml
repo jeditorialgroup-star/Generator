@@ -1,5 +1,9 @@
 # site_config.yaml — psicoprotego.es
 # Configuración específica del sitio para el pipeline multi-site.
+#
+# ESTRATEGIA: Site de empresa (no monetizable con afiliados).
+# Objetivo: visibilidad SEO + autoridad de dominio + llamadas/consultas psicológicas.
+# Sin tracking de afiliados. Sin catálogo Amazon.
 
 site_id: "psicoprotego"
 domain: "psicoprotego.es"
@@ -7,6 +11,7 @@ wp_url: "https://psicoprotego.es"
 wp_path: "/var/www/psicoprotego"
 wp_db_prefix: "wp_"
 description: "Clínica de psicología en Pozuelo de Alarcón y Majadahonda"
+monetization: false   # site de empresa — sin afiliados, objetivo: llamadas/consultas
 
 # Base de datos
 db_env_prefix: "WP_PSICO"   # WP_PSICO_DB_HOST, WP_PSICO_DB_USER, etc.

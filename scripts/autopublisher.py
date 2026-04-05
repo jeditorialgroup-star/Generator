@@ -291,8 +291,53 @@ def load_affiliate_catalog() -> list:
     return []
 
 
-def find_affiliate_products(keyword: str, catalog: list) -> list[dict]:
-    """Find catalog products relevant to keyword."""
+def get_affiliate_performance() -> dict:
+    """
+    Query ir_affiliate_clicks for click counts per ASIN.
+    Returns {asin: {clicks_30d, clicks_60d}}.
+    """
+    try:
+        conn = db_connect()
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT asin,
+                 SUM(clicked_at >= NOW() - INTERVAL 30 DAY) AS clicks_30d,
+                 SUM(clicked_at >= NOW() - INTERVAL 60 DAY) AS clicks_60d
+               FROM ir_affiliate_clicks
+               GROUP BY asin"""
+        )
+        result = {
+            row["asin"]: {
+                "clicks_30d": int(row["clicks_30d"] or 0),
+                "clicks_60d": int(row["clicks_60d"] or 0),
+            }
+            for row in cur.fetchall()
+        }
+        cur.close()
+        conn.close()
+        return result
+    except Exception as e:
+        log.warning(f"get_affiliate_performance error: {e}")
+        return {}
+
+
+def is_comparative_keyword(keyword: str) -> bool:
+    """Return True if keyword signals a comparative/ranking post type."""
+    signals = ["mejor", "mejores", "comparativa", " vs ", "ranking", "top ", "cuál ", "cuáles", "diferencia entre", "alternativa"]
+    kw = keyword.lower()
+    return any(s in kw for s in signals)
+
+
+def find_affiliate_products(keyword: str, catalog: list, performance: dict | None = None) -> list[dict]:
+    """
+    Find relevant catalog products, scored by keyword overlap + click performance.
+    Annotates each product with:
+      _score (0-1): composite relevance+performance score
+      _proven: True if >10 clicks in last 30 days
+      _cold: True if 0 clicks in last 60 days (with actual data)
+    """
+    if performance is None:
+        performance = {}
     kw_words = set(re.findall(r"\b\w{4,}\b", keyword.lower()))
     relevant = []
     for product in catalog:
@@ -300,11 +345,28 @@ def find_affiliate_products(keyword: str, catalog: list) -> list[dict]:
             w.lower() for kw in product.get("keywords", [])
             for w in re.findall(r"\b\w{4,}\b", kw)
         )
-        overlap = kw_words & product_words
-        if overlap:
-            relevant.append({**product, "_overlap": len(overlap)})
-    relevant.sort(key=lambda x: x["_overlap"], reverse=True)
-    return relevant[:4]
+        overlap = len(kw_words & product_words)
+        if overlap == 0:
+            continue
+
+        asin = product.get("asin", "")
+        perf = performance.get(asin, {})
+        clicks_30d = perf.get("clicks_30d", -1)   # -1 = no data in DB
+        clicks_60d = perf.get("clicks_60d", -1)
+        proven = clicks_30d > 10
+        cold = clicks_60d == 0 and asin in performance   # explicitly 0, not absent
+
+        overlap_score = min(1.0, overlap / 3.0)
+        perf_boost = 0.3 if proven else (-0.2 if cold else 0.0)
+        score = round(min(1.0, max(0.0, overlap_score + perf_boost)), 3)
+
+        relevant.append({**product, "_overlap": overlap, "_score": score, "_proven": proven, "_cold": cold})
+
+    # Keep warm products if available; sort by score
+    warm = [p for p in relevant if not p["_cold"]]
+    pool = warm if warm else relevant
+    pool.sort(key=lambda x: x["_score"], reverse=True)
+    return pool[:5]
 
 
 # ── Editorial rules ───────────────────────────────────────────────────────────
@@ -625,10 +687,16 @@ def research_phase(keyword: str, api_key: str) -> dict:
         except Exception as e:
             log.warning(f"  Internal links error: {e}")
 
-    # Affiliate products
+    # Affiliate products — with performance data
     catalog = load_affiliate_catalog()
-    result["affiliate_products"] = find_affiliate_products(keyword, catalog)
-    log.info(f"  Afiliados: {len(result['affiliate_products'])} productos relevantes")
+    if catalog and AFFILIATE_TAG:
+        performance = get_affiliate_performance()
+        result["affiliate_products"] = find_affiliate_products(keyword, catalog, performance)
+        proven = sum(1 for p in result["affiliate_products"] if p.get("_proven"))
+        log.info(f"  Afiliados: {len(result['affiliate_products'])} productos relevantes ({proven} probados)")
+    else:
+        result["affiliate_products"] = []
+        log.info("  Afiliados: sitio sin monetización o catálogo vacío")
 
     return result
 
@@ -700,7 +768,7 @@ def _fetch_sources_for_brief(keyword: str, serper_key: str, jina_key: str) -> li
 
 # ── Brief builder ─────────────────────────────────────────────────────────────
 
-def build_brief(keyword: str, research: dict) -> str:
+def build_brief(keyword: str, research: dict, search_intent: str = "informational") -> str:
     """Build structured brief for the generation prompt."""
     parts = [f"BRIEF DE GENERACIÓN — Tema: {keyword}\n"]
 
@@ -737,16 +805,53 @@ def build_brief(keyword: str, research: dict) -> str:
         for link in research["internal_links"]:
             parts.append(f'  • {link["title"]}: {WP_URL}/{link["slug"]}/')
 
-    if research["affiliate_products"]:
-        parts.append("\n═══════════════════════════════════════")
-        parts.append("PRODUCTOS AFILIADOS (integrar en el PRIMER TERCIO del post, en sección de recomendaciones o dentro de un párrafo de consejo práctico)")
-        parts.append("═══════════════════════════════════════")
-        parts.append("Formato enlace: <a href=\"https://www.amazon.es/dp/ASIN/ref=nosim?tag=inforeparto-21\" target=\"_blank\" rel=\"nofollow noopener\">nombre del producto</a>")
-        parts.append("Si añades afiliados, incluye este aviso ANTES del primer H2:")
-        if AFFILIATE_DISCLOSURE:
-            parts.append(f'<p class="aviso-afiliados"><em>{AFFILIATE_DISCLOSURE}</em></p>')
-        for p in research["affiliate_products"]:
-            parts.append(f'  • {p["name"]} (ASIN: {p["asin"]}) — keywords: {", ".join(p.get("keywords", [])[:3])}')
+    products = research.get("affiliate_products", [])
+    if products and AFFILIATE_TAG:
+        max_score = max((p.get("_score", 0) for p in products), default=0)
+        # Skip affiliates for purely informational keywords with low product match
+        if search_intent == "informational" and max_score < 0.3:
+            parts.append("\n━━━ AFILIADOS: omitidos (keyword informacional, match insuficiente — no fuerces productos irrelevantes) ━━━")
+        else:
+            parts.append("\n═══════════════════════════════════════")
+            comparative = is_comparative_keyword(keyword)
+
+            if comparative:
+                parts.append("FORMATO COMPARATIVO — crea una tabla HTML de 3-5 productos:")
+                parts.append("═══════════════════════════════════════")
+                parts.append(
+                    "<table><thead><tr><th>Producto</th><th>Para qué sirve</th><th>Enlace</th></tr></thead><tbody>"
+                    "\n  [una fila por producto de la lista]"
+                    "\n</tbody></table>"
+                )
+                parts.append("Productos disponibles:")
+                for p in products[:5]:
+                    tag = " ⭐" if p.get("_proven") else ""
+                    parts.append(f'  • {p["name"]}{tag} — ASIN: {p["asin"]} — enlace: https://www.amazon.es/dp/{p["asin"]}/ref=nosim?tag={AFFILIATE_TAG}')
+            else:
+                main = products[0]
+                secondary = products[1] if len(products) > 1 else None
+                proven_note = " [⭐ producto con historial de clics — priorizar]" if main.get("_proven") else ""
+
+                parts.append(f"PRODUCTO PRINCIPAL → insertar en el PRIMER TERCIO como mini-bloque:{proven_note}")
+                parts.append("═══════════════════════════════════════")
+                parts.append(f"  Nombre: {main['name']} | ASIN: {main['asin']}")
+                parts.append(
+                    f'  Formato exacto:\n'
+                    f'  <div class="affiliate-block">\n'
+                    f'    <strong>{main["name"]}</strong> — [frase de beneficio concreto, 1 línea].\n'
+                    f'    <a href="https://www.amazon.es/dp/{main["asin"]}/ref=nosim?tag={AFFILIATE_TAG}" '
+                    f'target="_blank" rel="nofollow noopener">Ver en Amazon →</a>\n'
+                    f'  </div>'
+                )
+
+                if secondary:
+                    parts.append(f"\nPRODUCTO SECUNDARIO → mención natural en el ÚLTIMO TERCIO (no mini-bloque, solo enlace inline):")
+                    parts.append(f"  Nombre: {secondary['name']} | ASIN: {secondary['asin']}")
+                    parts.append(f"  Enlace: https://www.amazon.es/dp/{secondary['asin']}/ref=nosim?tag={AFFILIATE_TAG}")
+
+            parts.append("\nAVISO DE AFILIADOS — incluir ANTES del primer H2 (si no existe ya):")
+            if AFFILIATE_DISCLOSURE:
+                parts.append(f'<p class="aviso-afiliados"><em>{AFFILIATE_DISCLOSURE}</em></p>')
 
     return "\n".join(parts)
 
@@ -775,7 +880,7 @@ ESTRUCTURA DEL POST:
 CONTENIDO:
 - Usa los datos y fuentes del brief (cítalos de forma natural, sin notas al pie)
 - Integra 1-2 experiencias reales del brief donde encajen
-- Añade los productos afiliados en el PRIMER TERCIO del post
+- Sigue las instrucciones de afiliados del brief: mini-bloque en primer tercio, mención inline en último tercio, tabla si es post comparativo
 - Enlaza internamente los posts del brief donde sea natural
 - NO inventar datos, cifras o normativas que no estén en el brief
 
@@ -1323,15 +1428,18 @@ def main():
     log.info("Research phase...")
     research = research_phase(keyword, api_key)
 
-    has_affiliates = bool(research["affiliate_products"])
-    if not has_affiliates:
+    search_intent = topic.get("search_intent", "informational") if topic else "informational"
+    products = research["affiliate_products"]
+    max_score = max((p.get("_score", 0) for p in products), default=0)
+    has_affiliates = bool(products) and not (search_intent == "informational" and max_score < 0.3)
+    if not has_affiliates and AFFILIATE_TAG:
         telegram_send(
             f"💡 <b>Sin afiliados para:</b> <i>{keyword}</i>\n"
             f"Considera añadir productos relevantes al catálogo."
         )
 
     # ── Build brief ───────────────────────────────────────────────────────────
-    brief = build_brief(keyword, research)
+    brief = build_brief(keyword, research, search_intent=search_intent)
     log.info(f"Brief construido ({len(brief)} chars)")
 
     # ── Generate post (with content_guardrails retry) ────────────────────────
