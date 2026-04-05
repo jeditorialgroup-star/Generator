@@ -839,6 +839,124 @@ def save_as_draft(title: str, content: str, dry_run: bool) -> int | None:
     return None
 
 
+# ── Schema markup ────────────────────────────────────────────────────────────
+
+_H2_RE = re.compile(r"<h2[^>]*>(.*?)</h2>", re.IGNORECASE | re.DOTALL)
+_H3_RE = re.compile(r"<h3[^>]*>(.*?)</h3>", re.IGNORECASE | re.DOTALL)
+_P_AFTER_H_RE = re.compile(r"</h[23][^>]*>\s*<p[^>]*>(.*?)</p>", re.IGNORECASE | re.DOTALL)
+_OL_RE = re.compile(r"<ol[^>]*>(.*?)</ol>", re.IGNORECASE | re.DOTALL)
+_LI_RE = re.compile(r"<li[^>]*>(.*?)</li>", re.IGNORECASE | re.DOTALL)
+_STRIP_TAGS_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_tags(s: str) -> str:
+    return _STRIP_TAGS_RE.sub("", s).strip()
+
+
+def detect_schema_type(html: str, title: str) -> str:
+    """Detect the most appropriate Schema.org type for the given post HTML."""
+    title_lower = title.lower()
+    headings = [_strip_tags(h) for h in _H2_RE.findall(html) + _H3_RE.findall(html)]
+
+    # FAQPage: headings ending in "?"
+    faq_headings = [h for h in headings if h.strip().endswith("?")]
+    if len(faq_headings) >= 2:
+        return "FAQPage"
+
+    # HowTo: ordered list or sequential H2/H3 steps
+    if _OL_RE.search(html):
+        return "HowTo"
+
+    # ItemList: comparative / best-of titles or headings
+    comparative_signals = ["mejor", "mejores", "top ", "ranking", "comparativa", "vs"]
+    if any(sig in title_lower for sig in comparative_signals):
+        return "ItemList"
+
+    return "Article"
+
+
+def build_schema_jsonld(schema_type: str, html: str, title: str, url: str) -> str:
+    """Generate a JSON-LD <script> block for the given schema type."""
+    if schema_type == "FAQPage":
+        headings = list(_H2_RE.finditer(html)) + list(_H3_RE.finditer(html))
+        qa_pairs = []
+        for m in headings:
+            question = _strip_tags(m.group(1)).strip()
+            if not question.endswith("?"):
+                continue
+            # First paragraph after this heading
+            after = html[m.end():]
+            p_match = re.search(r"<p[^>]*>(.*?)</p>", after, re.IGNORECASE | re.DOTALL)
+            answer = _strip_tags(p_match.group(1))[:300] if p_match else ""
+            if answer:
+                qa_pairs.append({"question": question, "answer": answer})
+            if len(qa_pairs) >= 5:
+                break
+        if not qa_pairs:
+            return ""
+        schema = {
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            "mainEntity": [
+                {
+                    "@type": "Question",
+                    "name": qa["question"],
+                    "acceptedAnswer": {"@type": "Answer", "text": qa["answer"]},
+                }
+                for qa in qa_pairs
+            ],
+        }
+
+    elif schema_type == "HowTo":
+        steps = []
+        ol_match = _OL_RE.search(html)
+        if ol_match:
+            for i, li in enumerate(_LI_RE.finditer(ol_match.group(1)), 1):
+                text = _strip_tags(li.group(1))[:200]
+                if text:
+                    steps.append({
+                        "@type": "HowToStep",
+                        "position": i,
+                        "name": text[:60],
+                        "text": text,
+                    })
+        schema = {
+            "@context": "https://schema.org",
+            "@type": "HowTo",
+            "name": title,
+            "step": steps,
+        }
+
+    elif schema_type == "ItemList":
+        headings = [_strip_tags(h) for h in _H2_RE.findall(html)]
+        items = [
+            {"@type": "ListItem", "position": i, "name": h}
+            for i, h in enumerate(headings[:10], 1)
+            if h
+        ]
+        schema = {
+            "@context": "https://schema.org",
+            "@type": "ItemList",
+            "name": title,
+            "itemListElement": items,
+        }
+
+    else:  # Article (default)
+        schema = {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "headline": title,
+            "url": url,
+            "publisher": {
+                "@type": "Organization",
+                "name": "inforeparto.com",
+                "url": WP_URL,
+            },
+        }
+
+    return f'\n<script type="application/ld+json">\n{json.dumps(schema, ensure_ascii=False, indent=2)}\n</script>'
+
+
 # ── Affiliate link tracking rewriter ─────────────────────────────────────────
 
 _AMAZON_LINK_RE = re.compile(
@@ -963,7 +1081,7 @@ def naturalize_content(content: str, title: str, research: dict) -> tuple[str, d
 
 # ── Naturalization log ────────────────────────────────────────────────────────
 
-def log_to_db(title: str, wp_post_id: int, score: dict, research: dict):
+def log_to_db(title: str, wp_post_id: int, score: dict, research: dict, schema_type: str = "Article"):
     try:
         conn = db_connect()
         cur = conn.cursor()
@@ -971,12 +1089,13 @@ def log_to_db(title: str, wp_post_id: int, score: dict, research: dict):
         sources_added = [s.get("url", "") for s in research.get("sources", [])]
         cur.execute(
             """INSERT INTO ir_naturalization_log
-               (site, topic, wp_post_id, score_after, experiences_used, sources_added)
-               VALUES (%s, %s, %s, %s, %s, %s)""",
+               (site, topic, wp_post_id, score_after, experiences_used, sources_added, schema_type)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
             (
                 SITE, title, wp_post_id, score["overall"],
                 json.dumps(experiences_used, ensure_ascii=False),
                 json.dumps(sources_added, ensure_ascii=False),
+                schema_type,
             ),
         )
         conn.commit()
@@ -984,6 +1103,20 @@ def log_to_db(title: str, wp_post_id: int, score: dict, research: dict):
         conn.close()
     except Exception as e:
         log.warning(f"  Log DB error: {e}")
+
+
+def ping_sitemap():
+    """Ping Google with the sitemap URL to trigger re-crawling."""
+    try:
+        sitemap_url = f"{WP_URL}/sitemap_index.xml"
+        resp = requests.get(
+            "https://www.google.com/ping",
+            params={"sitemap": sitemap_url},
+            timeout=10,
+        )
+        log.info(f"  Sitemap ping: {resp.status_code}")
+    except Exception as e:
+        log.warning(f"  Sitemap ping error: {e}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -1142,6 +1275,14 @@ def main():
     # ── Inject disclaimers ────────────────────────────────────────────────────
     naturalized = inject_disclaimers(naturalized, rules)
 
+    # ── Schema markup ─────────────────────────────────────────────────────────
+    post_url = f"{WP_URL}/{keyword.replace(' ', '-').lower()}/"
+    schema_type = detect_schema_type(naturalized, title)
+    schema_jsonld = build_schema_jsonld(schema_type, naturalized, title, post_url)
+    if schema_jsonld:
+        naturalized = naturalized + schema_jsonld
+        log.info(f"  Schema inyectado: {schema_type}")
+
     score_val = score["overall"]
     score_emoji = "✅" if score_val >= 70 else ("⚠️" if score_val >= 50 else "❌")
     log.info(f"NaturalScore: {score_val}/100 {score_emoji}")
@@ -1171,7 +1312,8 @@ def main():
             if topic_id and not args.dry_run:
                 mark_topic_done(conn, topic_id, wp_post_id)
             if not args.dry_run:
-                log_to_db(title, wp_post_id, score, research)
+                log_to_db(title, wp_post_id, score, research, schema_type)
+                ping_sitemap()
 
             preview_url = f"{WP_URL}/?p={wp_post_id}"
             lines = [
