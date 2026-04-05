@@ -1,0 +1,73 @@
+# editorial_rules.yaml — inforeparto.com
+# Reglas editoriales, restricciones temáticas y requisitos de disclaimer.
+# Leído por autopublisher.py y por el legal review del pipeline.
+
+# ── Temas prohibidos ────────────────────────────────────────────────────────
+# keywords: si el tema contiene ALGUNA de estas palabras → prohibido
+# exceptions: keywords que anulan la prohibición si también aparecen
+# reason: se incluye en el log y la notificación Telegram
+
+prohibited_topics:
+  - keywords: ["autónomo", "autónomos", "RETA", "cuota autónomo", "alta autónomo", "darse de alta autónomo"]
+    exceptions: ["amazon flex", "amazon logistics"]
+    reason: "Desde la Ley Rider (RDL 9/2021) los riders de plataforma son asalariados. No tratar régimen de autónomos para riders Glovo/Uber Eats/Just Eat. Excepción: Amazon Flex (sí es autónomo)."
+
+  - keywords: ["fraude", "b negro", "en negro", "evasión", "no declarar"]
+    exceptions: []
+    reason: "No facilitar información que pueda interpretarse como asesoramiento para evasión fiscal o fraude laboral."
+
+  - keywords: ["alquiler de cuenta", "alquilar cuenta", "cuenta prestada"]
+    exceptions: []
+    reason: "El alquiler de cuentas de plataformas es ilegal. Solo tratar como denuncia/advertencia, nunca como guía."
+
+# ── Disclaimers obligatorios ────────────────────────────────────────────────
+# trigger_keywords: si el post contiene ALGUNA → añadir el disclaimer correspondiente
+# placement: "before_first_h2" | "end_of_post" | "before_table"
+# html: bloque HTML a insertar
+
+disclaimer_triggers:
+  universal:
+    trigger_keywords: [
+      "IRPF", "declaración de la renta", "hacienda", "tributar", "deducir", "desgravar",
+      "modelo 303", "modelo 130", "modelo 036", "IVA", "gastos deducibles",
+      "convenio colectivo", "ERE", "despido", "indemnización", "demanda",
+      "inspección de trabajo", "sindicato", "reclamar", "baja laboral",
+      "cuánto gana", "cuánto se gana", "ganancias", "ingresos medios", "sueldo medio", "rentabilidad",
+      "tabla salarial", "tablas salariales", "salario base convenio", "salario convenio", "plus convenio",
+      "seguro", "cobertura", "póliza", "accidente laboral", "responsabilidad civil"
+    ]
+    placement: "end_of_post"
+    html: |
+      <div class="disclaimer disclaimer-info" style="background:#f5f5f5;border-left:4px solid #757575;padding:1em 1.2em;margin:2em 0;border-radius:4px">
+      <p><strong>ℹ️ Aviso:</strong> La información de este artículo es orientativa y tiene carácter divulgativo. No sustituye el asesoramiento de un profesional (asesor fiscal, abogado laboralista o corredor de seguros). Cada situación personal puede ser diferente — consulta con un experto antes de tomar decisiones.</p>
+      </div>
+
+# ── Longitud y estructura ────────────────────────────────────────────────────
+
+post_structure:
+  min_words: 900
+  max_words: 1400          # Posts concisos > posts relleno
+  max_h2: 5
+  max_affiliate_links: 5   # No abusar de enlaces de afiliado
+  h1_in_content: false     # WP gestiona el H1 del título — NO incluir en el HTML del post
+
+# ── Imágenes ─────────────────────────────────────────────────────────────────
+
+images:
+  required: true
+  search_context: "Spain Spanish"   # Añadir al query de Pexels para contexto español
+  attribution_in_caption: false     # No mostrar créditos en el caption del post
+  max_images: 1                     # Por ahora, solo imagen destacada
+
+# ── Alertas rojas (legal review) ─────────────────────────────────────────────
+# El autopublisher rechaza el post si detecta estas frases en el contenido generado.
+
+red_flags:
+  - pattern: "debes declarar"
+    reason: "Asesoramiento fiscal concreto — reformular como orientación general"
+  - pattern: "te puedes deducir"
+    reason: "Asesoramiento fiscal concreto — usar 'es posible deducir' o 'puede deducirse'"
+  - pattern: "tienes derecho a indemnización de"
+    reason: "Asesoramiento legal concreto con cifra — eliminar o reformular"
+  - pattern: "demanda a "
+    reason: "Instrucción legal directa — reformular como información general"
